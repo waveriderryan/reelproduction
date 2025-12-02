@@ -1,42 +1,35 @@
-# ------------------------------------------------------------
-# Base Image with CUDA + Ubuntu (required for GPU use in Batch)
-# ------------------------------------------------------------
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+# Start from linuxserver ffmpeg (Ubuntu 24.04 base, FFmpeg 8.x, CUDA/NVENC enabled)
+FROM linuxserver/ffmpeg:latest
 
-# Avoid interactive prompts
+# Make sure runtime still sees GPUs
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ------------------------------------------------------------
-# Install FFmpeg + gsutil + dependencies
-# ------------------------------------------------------------
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    curl \
-    python3 \
-    python3-pip \
-    bash \
+# Install Python + tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv python3-dev \
     ca-certificates \
-    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install gsutil (needed for fetching & uploading clips)
-RUN pip3 install gsutil
-
-# ------------------------------------------------------------
-# Create working directory
-# ------------------------------------------------------------
+# Create app directory
 WORKDIR /app
 
-# ------------------------------------------------------------
-# Copy scripts and make them executable
-# ------------------------------------------------------------
-COPY scripts/ ./scripts/
-RUN chmod +x ./scripts/*.sh
+# Create venv
+RUN python3 -m venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
 
-# Copy logo if stored in repo
-COPY reelchains_logo.png ./
+# Copy your app
+COPY assets/ ./assets/
+COPY src/ ./src/
+COPY src/requirements.txt ./src/requirements.txt
 
-# ------------------------------------------------------------
-# Default command (user can override in Batch job)
-# ------------------------------------------------------------
-CMD ["/bin/bash"]
+# Install Python dependencies
+RUN pip install --upgrade pip \
+ && pip install --no-cache-dir -r src/requirements.txt
+
+# Work directory for temporary output
+ENV WORK_DIR=/tmp/reelWork
+
+# Run your main program
+ENTRYPOINT ["python3", "/app/src/productionJob.py"]
