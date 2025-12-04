@@ -62,8 +62,16 @@ def run_ffmpeg(cam1, mode1, cam2, mode2, voff1, outname):
         "-ac", "2",
         "-vsync", "cfr",
         "-r", "30",
-        "-c:v", "hevc_videotoolbox",
-        "-tag:v", "hvc1",
+            # --- NVENC video encoding ---
+        "-map", "[outv]",
+        "-map", "[aout]",
+
+        "-c:v", "hevc_nvenc",
+        "-preset", "p4",                  # Good speed/quality balance for T4
+        "-rc:v", "vbr_hq",                # Quality-focused rate control
+        "-b:v", "12M",                    # Reasonable high quality bitrate
+        "-pix_fmt", "yuv420p",            # iPhone-compatible
+
         "-c:a", "aac",
         "-b:a", "192k",
         "-movflags", "+faststart",

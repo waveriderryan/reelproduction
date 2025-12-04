@@ -6,9 +6,45 @@ import sys
 import traceback
 from google.cloud import pubsub_v1
 
+# Hardcoded for simplicity, or pass via args
+RESULT_TOPIC_ID = "production-results"
+
 # Import the main entry point from your existing script
 # This assumes productionJob.py has a function: def main(argv=None):
 import productionJob
+
+def report_completion(project_id, status, payload, error_msg=None):
+    """
+    Publishes a JSON message back to Java via Pub/Sub
+    """
+    try:
+        publisher = pubsub_v1.PublisherClient()
+        topic_path = publisher.topic_path(project_id, RESULT_TOPIC_ID)
+        
+        # Helper to extract production ID from the inputs list we constructed earlier
+        # (Java sent it as an attribute, but here we might need to dig it out 
+        # or just rely on the output filename which usually contains the ID)
+        # BETTER APPROACH: Pass production_id explicitly in the JSON payload from Java.
+        
+        # Let's assume payload['productionId'] exists (we will add it to Java DTO below)
+        prod_id = payload.get('productionId', "UNKNOWN")
+        
+        # Construct result message
+        result_data = {
+            "productionId": prod_id,
+            "status": status,
+            # Assuming first output is the main one
+            "outputKey": payload.get('outputs', [""])[0] if 'outputs' in payload else "", 
+            "error": error_msg
+        }
+        
+        json_str = json.dumps(result_data)
+        future = publisher.publish(topic_path, json_str.encode("utf-8"))
+        print(f"📢 Published result to {RESULT_TOPIC_ID}: {future.result()}")
+        
+    except Exception as e:
+        print(f"🔥 Failed to report completion: {e}")
+
 
 def process_message(message, args):
     """
@@ -50,13 +86,17 @@ def process_message(message, args):
 
         if exit_code == 0:
             print("✅ Job completed successfully.")
-            message.ack() # Acknowledge receipt so it's removed from queue
+            # --- NEW: REPORT SUCCESS ---
+            report_completion(args.project_id, "COMPLETED", payload)
             
-            print("💤 Coordinator shutting down container to stop billing...")
-            os._exit(0) # Force exit to terminate the Spot VM
+            message.ack()
+            os._exit(0)
         else:
             print(f"❌ Job failed with exit code {exit_code}")
-            message.nack() # Negative Ack: Pub/Sub will redeliver (optional logic here)
+            # --- NEW: REPORT FAILURE ---
+            report_completion(args.project_id, "FAILED", payload, error_msg=f"Exit code {exit_code}")
+            
+            message.nack()
             os._exit(1)
 
     except Exception as e:
