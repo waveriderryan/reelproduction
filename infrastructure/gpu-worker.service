@@ -1,0 +1,36 @@
+[Unit]
+Description=GPU Worker Agent
+
+# 1. THE WAITING ROOM
+# This line says: "Do not start me until the Network is online 
+# AND the Docker daemon is fully running."
+After=network.target docker.service
+
+# 2. THE NVIDIA CHECK
+# This is the most critical line. It ensures the NVIDIA Persistence Daemon 
+# (which initializes the GPU chips) is active.
+After=nvidia-persistenced.service
+
+[Service]
+Type=simple
+User=root
+
+# 3. THE DOUBLE-CHECK
+# Even after waiting for the service above, we run 'nvidia-smi' as a pre-command.
+# If this command fails (returns error), the main script WON'T start.
+# This guarantees we never run a job on a broken GPU.
+ExecStartPre=/usr/bin/nvidia-smi
+
+# 4. THE MAIN EVENT
+# This launches your wrapper script, which pulls the message and runs Docker.
+ExecStart=/usr/bin/python3 /opt/worker-lifecycle.py
+
+# 5. RESILIENCE
+# If the script crashes unexpectedly, wait 5 seconds and try again.
+# (But if it exits cleanly because you called 'shutdown', it stays stopped).
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# This tells Linux to launch this service automatically when the server boots up (multi-user mode).
+WantedBy=multi-user.target

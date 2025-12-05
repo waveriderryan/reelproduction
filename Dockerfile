@@ -6,6 +6,17 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 ENV DEBIAN_FRONTEND=noninteractive
 
+# ---------------------------------------------------------------------------
+# NEW: Ensure logs appear in Cloud Logging immediately (Critical for debugging)
+# ---------------------------------------------------------------------------
+ENV PYTHONUNBUFFERED=1
+
+# ---------------------------------------------------------------------------
+# NEW: Tell your script to run in "One-Shot" mode
+# Your Python script should check os.environ.get('WORKER_MODE')
+# ---------------------------------------------------------------------------
+ENV WORKER_MODE=single_task
+
 # Install Python + tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python3-dev \
@@ -20,19 +31,9 @@ RUN python3 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
 # Copy your source code
-# Assumes your folder structure is:
-#   src/
-#     ├── productionCoordinator.py
-#     ├── productionJob.py
-#     ├── ffmpegVideoRender.py
-#     ├── ffmpegAudioTools.py
-#     └── requirements.txt
 COPY src/ /app/src/
 
 # Install Python dependencies
-# IMPORTANT: Ensure src/requirements.txt contains:
-#   google-cloud-storage
-#   google-cloud-pubsub
 RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r /app/src/requirements.txt
 
@@ -43,6 +44,11 @@ RUN mkdir -p /workspace
 # Make scripts executable
 RUN chmod +x /app/src/*.py
 
-# Set the ENTRYPOINT to the new Coordinator script
-# This wrapper will listen for the Pub/Sub message and trigger the job
+# Define these in your Java 'startVm' call or Golden Image env, 
+# or hardcode them here if they never change.
+ENV GCP_PROJECT=your-project-id
+ENV PUBSUB_SUBSCRIPTION=your-subscription-id
+ENV WORKER_MODE=single_task
+
+# Set the ENTRYPOINT
 ENTRYPOINT ["python3", "/app/src/productionCoordinator.py"]
