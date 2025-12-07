@@ -33,6 +33,10 @@ ENV PATH="/app/venv/bin:$PATH"
 # Copy your source code
 COPY src/ /app/src/
 
+# 2. Copy Assets (This is the missing part!)
+# This takes your local "assets" folder and puts it at "/app/assets"
+COPY assets/ /app/assets/
+
 # Install Python dependencies
 RUN pip install --upgrade pip \
  && pip install --no-cache-dir -r /app/src/requirements.txt
@@ -46,7 +50,7 @@ RUN chmod +x /app/src/*.py
 
 # Define these in your Java 'startVm' call or Golden Image env, 
 # or hardcode them here if they never change.
-ENV GCP_PROJECT=your-project-id
+ENV GCP_PROJECT=reelchains-458715
 ENV PUBSUB_SUBSCRIPTION=your-subscription-id
 ENV WORKER_MODE=single_task
 

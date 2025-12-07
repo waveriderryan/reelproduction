@@ -58,6 +58,7 @@ def buildThreeLandscapeCmd(localPaths, offsets, outVideo: Path):
 
         "-map", "[outv]",
         "-c:v", "hevc_nvenc",
+        "-tag:v", "hvc1",
         "-preset", "p5",
         "-rc", "vbr",
         "-b:v", "14M",

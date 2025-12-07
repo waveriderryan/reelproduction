@@ -45,6 +45,7 @@ def buildTwoPortraitCmd(localPaths, offsets, outVideo: Path):
         "-filter_complex", filtergraph,
         "-map", "[outv]",
         "-c:v", "hevc_nvenc",
+        "-tag:v", "hvc1",
         "-rc", "vbr",
         "-b:v", "12M",
         "-pix_fmt", "yuv420p",

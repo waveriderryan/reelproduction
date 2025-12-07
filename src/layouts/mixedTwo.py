@@ -101,6 +101,7 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
 
         # --- HEVC via NVENC, Apple-friendly tag ---
         "-c:v", "hevc_nvenc",
+        "-tag:v", "hvc1",
         "-preset", "p5",
         "-rc", "vbr",
         "-b:v", "10M",
