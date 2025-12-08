@@ -1,71 +1,81 @@
 #!/bin/bash
+set -euo pipefail
 
-# 0. Logging: Save all output to a file on the data drive so you can read it later
+# ---------------------------------------------------------
+# 0. Logging: persist logs for post-mortem + Cloud ops
+# ---------------------------------------------------------
 exec > /data/worker-execution.log 2>&1
+echo "🟢 Worker script started at $(date)"
 
-echo "Script started at $(date)"
+# ---------------------------------------------------------
+# 1. Verify GPU availability (fast + sufficient now)
+# ---------------------------------------------------------
+if ! nvidia-smi; then
+  echo "❌ GPU not available — aborting worker startup"
+  exit 1
+fi
+echo "✅ GPU is ready"
 
-# 1. SMART GPU WAIT
-# Try to run nvidia-smi. If it fails, wait 1 second and try again.
-# We give it up to 60 seconds to wake up.
-echo "Waiting for GPU to initialize..."
-timeout=0
-while ! nvidia-smi > /dev/null 2>&1; do
-    sleep 1
-    ((timeout++))
-    if [ $timeout -ge 60 ]; then
-        echo "Error: GPU failed to initialize after 60 seconds."
-        # Don't shutdown immediately; keep it up for debugging
-        sleep 1800 
-        exit 1
-    fi
-done
-echo "GPU is ready!"
+# ---------------------------------------------------------
+# 2. Fetch metadata injected by Java / gcloud
+# ---------------------------------------------------------
+PROJECT_ID=$(curl -fs -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/project_id")
 
-# 2. Run the Docker Container
-# --gpus all : Gives the container access to the Nvidia card
-# --rm       : Deletes the container when it stops (keeps disk clean)
-# --name     : Names it so we can find it easily
-# -v         : Maps your big data drive
-echo "Launching Docker container..."
+SUBSCRIPTION_ID=$(curl -fs -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/subscription_id")
 
-# --- FETCH METADATA ---
-# This allows the Java code to tell us which specific job to listen to
-PROJECT_ID=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/project_id")
-SUBSCRIPTION_ID=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/subscription_id")
+echo "📡 Project:        ${PROJECT_ID}"
+echo "📡 Subscription:  ${SUBSCRIPTION_ID}"
 
-echo "Starting Worker for Project: $PROJECT_ID on Sub: $SUBSCRIPTION_ID"
-
-# ---------- DEBUG MODE ----------
-if [[ "$SUBSCRIPTION_ID" == "DEBUG" ]]; then
+# ---------------------------------------------------------
+# 3. DEBUG MODE (VM stays up, container does not auto-run)
+# ---------------------------------------------------------
+if [[ "${SUBSCRIPTION_ID}" == "DEBUG" ]]; then
   echo "🛑 DEBUG MODE enabled"
-  echo "Container will NOT auto-start"
-  echo "VM will NOT auto-shutdown"
-  echo "SSH in and run docker manually."
+  echo "• Docker container will not auto-start"
+  echo "• VM will remain online"
+  echo "• SSH in and run docker manually"
+  echo "--------------------------------------------------"
   tail -f /dev/null
   exit 0
 fi
-# --------------------------------
 
-docker run --rm --gpus all --name production-worker \
--e PROJECT_ID="$PROJECT_ID" \
--e SUBSCRIPTION_ID="$SUBSCRIPTION_ID" \
--v /data:/data us-central1-docker.pkg.dev/reelchains-458715/reel-prod/reelchains:gpu
+# ---------------------------------------------------------
+# 4. Pull latest image (important for spot workers)
+# ---------------------------------------------------------
+IMAGE="us-central1-docker.pkg.dev/reelchains-458715/reel-prod/reelchains:gpu"
+echo "⬇️  Pulling latest image: ${IMAGE}"
+docker pull "${IMAGE}"
 
-# 3. Capture the Exit Code
+# ---------------------------------------------------------
+# 5. Launch container
+# ---------------------------------------------------------
+echo "🚀 Launching production worker container"
+
+docker run --rm \
+  --gpus all \
+  --name production-worker \
+  -e GCP_PROJECT="${PROJECT_ID}" \
+  -e PUBSUB_SUBSCRIPTION="${SUBSCRIPTION_ID}" \
+  -e WORKER_MODE="single_task" \
+  -v /data:/data \
+  "${IMAGE}"
+
+# ---------------------------------------------------------
+# 6. Exit handling
+# ---------------------------------------------------------
 EXIT_CODE=$?
-echo "Container exited with code: $EXIT_CODE at $(date)"
+echo "📦 Container exited with code ${EXIT_CODE} at $(date)"
 
-# 4. Decision Logic
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "Job finished successfully (or timed out cleanly)."
-    echo "Shutting down in 60 seconds..."
-    sleep 60
-    shutdown -h now
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+  echo "✅ Job finished cleanly"
+  echo "⏱ Shutting down VM in 60s"
+  sleep 60
+  shutdown -h now
 else
-    echo "CRITICAL FAILURE: Container crashed or failed."
-    echo "Staying awake for 30 MINUTES to allow for debugging (SSH in now!)."
-    sleep 1800
-    echo "Debugging time over. Shutting down."
-    shutdown -h now
+  echo "🔥 CRITICAL FAILURE"
+  echo "🧪 VM will remain up for 30 minutes for debugging"
+  sleep 1800
+  shutdown -h now
 fi
