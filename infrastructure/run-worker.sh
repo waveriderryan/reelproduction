@@ -36,6 +36,17 @@ SUBSCRIPTION_ID=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.i
 
 echo "Starting Worker for Project: $PROJECT_ID on Sub: $SUBSCRIPTION_ID"
 
+# ---------- DEBUG MODE ----------
+if [[ "$SUBSCRIPTION_ID" == "DEBUG" ]]; then
+  echo "🛑 DEBUG MODE enabled"
+  echo "Container will NOT auto-start"
+  echo "VM will NOT auto-shutdown"
+  echo "SSH in and run docker manually."
+  tail -f /dev/null
+  exit 0
+fi
+# --------------------------------
+
 docker run --rm --gpus all --name production-worker \
 -e PROJECT_ID="$PROJECT_ID" \
 -e SUBSCRIPTION_ID="$SUBSCRIPTION_ID" \
