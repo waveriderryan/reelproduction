@@ -86,6 +86,10 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
     cmd = [
         "ffmpeg",
         "-y",
+        "-hwaccel", "cuda",
+        "-hwaccel_output_format" "cuda"
+        "-init_hw_device" "cuda=cu:0",
+        "-filter_hw_device" "cu",
 
         # Clip1 is always the trimmed one (started earlier).
         "-ss", offset_str, "-i", str(clip1),
@@ -106,7 +110,6 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
         "-rc", "vbr",
         "-b:v", "10M",
         "-pix_fmt", "yuv420p",
-        "-tag:v", "hvc1",
         "-movflags", "+faststart",
         "-r", "30",  # CFR 30 like your shell script
 

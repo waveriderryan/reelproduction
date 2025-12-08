@@ -41,7 +41,10 @@ def buildTwoLandscapeCmd(localPaths, offsets, outVideo: Path):
 
     return [
         "ffmpeg", "-y",
-
+        "-hwaccel", "cuda",
+        "-hwaccel_output_format" "cuda"
+        "-init_hw_device" "cuda=cu:0",
+        "-filter_hw_device" "cu",
         "-ss", f"{voff1}", "-i", str(clip1),
         "-ss", "0",        "-i", str(clip2),
         "-i", LOGO,
