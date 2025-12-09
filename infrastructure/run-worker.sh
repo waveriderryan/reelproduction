@@ -4,7 +4,9 @@ set -euo pipefail
 # ---------------------------------------------------------
 # 0. Logging: persist logs for post-mortem + Cloud ops
 # ---------------------------------------------------------
-exec > /data/worker-execution.log 2>&1
+mkdir -p /data/logs
+LOG_FILE="/data/logs/worker-$(date +%Y%m%d-%H%M%S).log"
+exec > "$LOG_FILE" 2>&1
 echo "🟢 Worker script started at $(date)"
 
 # ---------------------------------------------------------
@@ -15,6 +17,10 @@ if ! nvidia-smi; then
   exit 1
 fi
 echo "✅ GPU is ready"
+
+echo "Restarting Docker after GPU init..."
+systemctl restart docker
+sleep 3
 
 # ---------------------------------------------------------
 # 2. Fetch metadata injected by Java / gcloud
@@ -51,9 +57,12 @@ docker pull "${IMAGE}"
 # ---------------------------------------------------------
 # 5. Launch container
 # ---------------------------------------------------------
+echo "Cleaning up old docker runs"
+docker rm -f production-worker 2>/dev/null || true
+
 echo "🚀 Launching production worker container"
 
-docker run --rm \
+docker run \
   --gpus all \
   --name production-worker \
   -e GCP_PROJECT="${PROJECT_ID}" \

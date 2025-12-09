@@ -39,13 +39,8 @@ def buildTwoPortraitCmd(localPaths, offsets, outVideo: Path):
 
     return [
         "ffmpeg", "-y",
-
-        "-hwaccel", "cuda",
-        "-hwaccel_output_format", "cuda",
-        "-init_hw_device", "cuda=cu:0",
-        "-filter_hw_device", "cu",
-
-        "-ss", f"{voff1}", "-i", str(clip1),
+        "-ss", f"{voff1}",
+        "-i", str(clip1),
         "-i", str(clip2),
         "-i", LOGO,
         "-filter_complex", filtergraph,
@@ -56,5 +51,5 @@ def buildTwoPortraitCmd(localPaths, offsets, outVideo: Path):
         "-b:v", "12M",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-        str(outVideo),
+        str(outVideo)
     ]
