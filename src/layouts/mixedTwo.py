@@ -101,13 +101,17 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
 
         # --- HEVC via NVENC, Apple-friendly tag ---
         "-c:v", "hevc_nvenc",
-        "-tag:v", "hvc1",
         "-preset", "p5",
         "-rc", "vbr",
-        "-b:v", "10M",
+        "-b:v", "5M",
+        "-maxrate", "6M",
+        "-bufsize", "12M",
+        "-g", "60",
+        "-profile:v", "main",
         "-pix_fmt", "yuv420p",
+        "-tag:v", "hvc1",
         "-movflags", "+faststart",
-        "-r", "30",  # CFR 30 like your shell script
+        "-r", "30",
 
         str(outVideo),
     ]
