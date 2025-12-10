@@ -72,6 +72,7 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
     #
     filtergraph = (
         f"{portrait_v}setpts=PTS-STARTPTS,"
+        f"transpose=clock,"
         f"scale={TARGET_W}:{TOP_H}:force_original_aspect_ratio=decrease,"
         f"pad={TARGET_W}:{TOP_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}[top];"
         f"{landscape_v}setpts=PTS-STARTPTS,"
@@ -87,6 +88,7 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
         "ffmpeg",
         "-y",
 
+        "-noautorotate"
         # Clip1 is always the trimmed one (started earlier).
         "-ss", offset_str, "-i", str(clip1),
 
