@@ -3,16 +3,16 @@ import json
 
 from jinja2 import Environment, PackageLoader
 
-from src.production_tool.utils.logging_util import get_logger
-from src.production_tool.utils.data_model import Events
-from src.production_tool.llm.google_genai import GoogleGenai
+from src.ai_video_production.utils.logging_util import get_logger
+from src.ai_video_production.utils.data_model import Events
+from src.ai_video_production.llm.google_genai import GoogleGenai
 
 logger = get_logger(__name__)
 
 
 def load_prompt(activity_type: str):
     env = Environment(
-        loader=PackageLoader('src.production_tool.video_analysis', 'prompt_template'),
+        loader=PackageLoader('src.ai_video_production.video_analysis', 'prompt_template'),
         trim_blocks=True,
         lstrip_blocks=True,
     )

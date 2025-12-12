@@ -4,7 +4,7 @@ from typing import List
 from google import genai
 from google.genai import types
 
-from src.production_tool.utils.logging_util import get_logger
+from src.ai_video_production.utils.logging_util import get_logger
 
 
 logger = get_logger(__name__)
