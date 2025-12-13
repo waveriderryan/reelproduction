@@ -4,11 +4,33 @@ set -euo pipefail
 # ---------------------------------------------------------
 # 0. Logging: persist logs for post-mortem + Cloud ops
 # ---------------------------------------------------------
-mkdir -p /data/logs
-LOG_FILE="/data/logs/worker-$(date +%Y%m%d-%H%M%S).log"
-exec > "$LOG_FILE" 2>&1
-echo "🟢 Worker script started at $(date)"
+LOG_DIR="/data/logs"
+mkdir -p "$LOG_DIR"
 
+# Create a timestamped log file INSIDE the logs directory
+LOG_FILE="${LOG_DIR}/worker-$(date +%Y%m%d-%H%M%S).log"
+
+# Redirect all future output to this file AND the console
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "🟢 Worker script started at $(date)"
+set -e
+
+# Setup variables for the upload function later
+INSTANCE_NAME="$(hostname)"
+DATE_UTC="$(date -u +%Y-%m-%d)"
+GCS_LOG_DIR="gs://reel-artifacts/worker-logs/${INSTANCE_NAME}/${DATE_UTC}"
+
+upload_logs() {
+  echo "📤 Uploading logs to ${GCS_LOG_DIR} ..."
+  # -m: Multi-threaded (faster)
+  # -r: Recursive (include subdirectories)
+  # rsync: Smart sync (skips existing files)
+  gsutil -m rsync -r "$LOG_DIR" "${GCS_LOG_DIR}" || true
+}
+
+trap upload_logs EXIT
+trap upload_logs ERR
 # ---------------------------------------------------------
 # 1. Verify GPU availability (fast + sufficient now)
 # ---------------------------------------------------------
@@ -37,14 +59,30 @@ echo "📡 Subscription:  ${SUBSCRIPTION_ID}"
 # ---------------------------------------------------------
 # 3. DEBUG MODE (VM stays up, container does not auto-run)
 # ---------------------------------------------------------
-if [[ "${SUBSCRIPTION_ID}" == "DEBUG" ]]; then
-  echo "🛑 DEBUG MODE enabled"
-  echo "• Docker container will not auto-start"
-  echo "• VM will remain online"
-  echo "• SSH in and run docker manually"
-  echo "--------------------------------------------------"
-  tail -f /dev/null
-  exit 0
+if [ "$SUBSCRIPTION_ID" == "DEBUG" ]; then
+    echo "🛑 DEBUG MODE enabled"
+    echo "• Docker container will not auto-start"
+    
+    # 1. Schedule the Time Bomb (60 minutes)
+    echo "⏳ AUTO-SHUTDOWN SCHEDULED: VM will kill itself in 60 minutes."
+    shutdown -h +60 "Debug session time limit reached. Shutting down to save money." &
+
+    # 2. Create the 'Extend' shortcut command
+    # This creates a global command 'extend-session' that cancels the shutdown and adds another hour
+    cat << 'EOF' > /usr/local/bin/extend-session
+#!/bin/bash
+sudo shutdown -c
+echo "✅ Auto-shutdown CANCELLED."
+sudo shutdown -h +60 "Debug session extended. Shutting down in 60 minutes."
+echo "⏳ New shutdown scheduled for +60 minutes."
+EOF
+    chmod +x /usr/local/bin/extend-session
+
+    echo "• VM will remain online for 1 HOUR."
+    echo "• To stay longer, run:  sudo extend-session"
+    echo "• SSH in and run docker manually"
+    
+    exit 0
 fi
 
 # ---------------------------------------------------------
