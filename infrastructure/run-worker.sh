@@ -23,10 +23,7 @@ GCS_LOG_DIR="gs://reel-artifacts/worker-logs/${INSTANCE_NAME}/${DATE_UTC}"
 
 upload_logs() {
   echo "📤 Uploading logs to ${GCS_LOG_DIR} ..."
-  # -m: Multi-threaded (faster)
-  # -r: Recursive (include subdirectories)
-  # rsync: Smart sync (skips existing files)
-  gsutil -m rsync -r "$LOG_DIR" "${GCS_LOG_DIR}" || true
+  gsutil cp "$LOG_FILE" "${GCS_LOG_DIR}/" || true
 }
 
 trap upload_logs EXIT
@@ -100,6 +97,8 @@ docker rm -f production-worker 2>/dev/null || true
 
 echo "🚀 Launching production worker container"
 
+set +e
+
 docker run \
   --gpus all \
   --name production-worker \
@@ -114,6 +113,8 @@ docker run \
 # ---------------------------------------------------------
 EXIT_CODE=$?
 echo "📦 Container exited with code ${EXIT_CODE} at $(date)"
+
+set -e
 
 if [[ ${EXIT_CODE} -eq 0 ]]; then
   echo "✅ Job finished cleanly"
