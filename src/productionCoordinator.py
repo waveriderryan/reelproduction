@@ -33,15 +33,22 @@ def report_completion(project_id, status, payload, error_msg=None):
         
         prod_id = payload.get('productionId', "UNKNOWN")
         
+        # FIX: Look directly in 'payload', not 'payload.metadata'
         result_data = {
             "productionId": prod_id,
             "status": status,
-            "outputKey": payload.get('outputs', [""])[0] if 'outputs' in payload else "", 
-            "error": error_msg
+            "outputKey": payload.get('outputs', [""])[0], 
+            "error": error_msg,
+            
+            # ✅ CORRECT PATH:
+            "duration": payload.get('duration', 0.0),
+            "orientation": payload.get('orientation', "UNKNOWN")
         }
         
-        json_str = json.dumps(result_data)
-        future = publisher.publish(topic_path, json_str.encode("utf-8"))
+        print(f"📢 Publishing result payload: {result_data}")
+        
+        msg_bytes = json.dumps(result_data).encode("utf-8")
+        future = publisher.publish(topic_path, msg_bytes)
         print(f"📢 Published result to {RESULT_TOPIC_ID}: {future.result()}")
         
     except Exception as e:
@@ -90,66 +97,56 @@ def process_message(message, args):
     try:
         payload = json.loads(message.data.decode("utf-8"))
         
-        # Construct Args
-        job_args = []
-        if 'bucket' in payload: job_args.extend(["--bucket", payload['bucket']])
-        for inp in payload.get('inputs', []): job_args.extend(["--input", inp])
-        for out in payload.get('outputs', []): job_args.extend(["--outputGCS", out])
-        if 'workdir' in payload: job_args.extend(["--workdir", payload['workdir']])
-            
-        print(f"🚀 Coordinator invoking productionJob...")
+        print(f"🚀 Coordinator invoking productionJob (Direct Mode)...")
 
-        # Call the Job
-        exit_code = productionJob.main(job_args)
+        # 1. Call run_job DIRECTLY
+        # instead of building CLI strings, we pass the data straight in.
+        # This allows us to capture the 'metadata' return value.
+        output_path, metadata = productionJob.run_job(
+            bucket_name=payload['bucket'],
+            input_specs=payload.get('inputs', []),
+            output_gcs_paths=payload.get('outputs', []), # Note: JSON key is usually 'outputs'
+            workdir_str=payload.get('workdir', '/workspace')
+        )
 
-        if exit_code == 0:
-            print("✅ Job completed successfully.")
-            report_completion(args.project_id, "COMPLETED", payload)
-            
-            # ACK matches success: Remove from queue
-            message.ack() 
-            
-            # Clean up the dynamic subscription
-            cleanup_subscription(args.project_id, args.subscription_id)
-            
-            if worker_mode == 'single_task':
-                print("🏁 Single task complete. Exiting container.")
-                os._exit(0)
-                
-        else:
-            print(f"❌ Job failed with exit code {exit_code}")
-            # Report failure so Java marks DB as FAILED (stopping the logic loop)
-            report_completion(args.project_id, "FAILED", payload, error_msg=f"Exit code {exit_code}")
-            
-            # CRITICAL FIX: ACK the message anyway!
-            # If we NACK, it just loops forever. We have reported the failure, so we are done with this message.
-            print("💀 Acknowledging failed message to prevent infinite retry loop.")
-            message.ack() 
-            
-            # Clean up the dynamic subscription even on failure
-            cleanup_subscription(args.project_id, args.subscription_id)
-            
-            if worker_mode == 'single_task':
-                # Exit 0 prevents cloud provider from retrying the VM itself as a "crash"
-                # But you can use 1 if you want the orchestrator to know it 'failed'
-                os._exit(1)
+        # ---------------------------------------------------------
+        # SUCCESS PATH (No exception raised)
+        # ---------------------------------------------------------
+        print(f"✅ Job completed successfully. Metadata captured: {metadata}")
+
+        # 2. Inject Metadata into Payload
+        # This is the vital step that was missing.
+        payload['duration'] = metadata.get('duration', 0.0)
+        payload['orientation'] = metadata.get('orientation', 'unknown')
+
+        # 3. Report Success with DATA
+        report_completion(args.project_id, "COMPLETED", payload)
+        
+        # ACK matches success: Remove from queue
+        message.ack() 
+        
+        # Clean up the dynamic subscription
+        cleanup_subscription(args.project_id, args.subscription_id)
+        
+        if worker_mode == 'single_task':
+            print("🏁 Single task complete. Exiting container.")
+            os._exit(0)
 
     except Exception as e:
-        print(f"🔥 Critical error in coordinator: {e}")
-        traceback.print_exc()
+        # ---------------------------------------------------------
+        # FAILURE PATH (Exception raised by run_job)
+        # ---------------------------------------------------------
+        print(f"❌ Job failed with exception: {e}")
         
-        try:
-            # Attempt to report generic crash
-            report_completion(args.project_id, "FAILED", payload if 'payload' in locals() else {}, error_msg=str(e))
-            
-            # CRITICAL FIX: ACK here too.
-            message.ack() 
-            cleanup_subscription(args.project_id, args.subscription_id)
-        except Exception as inner_e:
-            print(f"Could not report/ack crash: {inner_e}")
-            # Only NACK if we literally cannot talk to the outside world
-            message.nack()
-
+        # Report failure so Java marks DB as FAILED
+        report_completion(args.project_id, "FAILED", payload, error_msg=str(e))
+        
+        print("💀 Acknowledging failed message to prevent infinite retry loop.")
+        message.ack() 
+        
+        # Clean up the dynamic subscription
+        cleanup_subscription(args.project_id, args.subscription_id)
+        
         if worker_mode == 'single_task':
             os._exit(1)
 

@@ -59,8 +59,8 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
     pw, ph = get_input_resolution(localPaths[portrait_idx])
     lw, lh = get_input_resolution(localPaths[landscape_idx])
 
-    portrait_rot = compute_rotation_filter(orientations[portrait_idx], pw, ph)
-    landscape_rot = compute_rotation_filter(orientations[landscape_idx], lw, lh)
+#    portrait_rot = compute_rotation_filter(orientations[portrait_idx], pw, ph)
+#    landscape_rot = compute_rotation_filter(orientations[landscape_idx], lw, lh)
 
     portrait_v = f"[{portrait_idx}:v]"
     landscape_v = f"[{landscape_idx}:v]"
@@ -68,13 +68,13 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
     filtergraph = (
         f"{portrait_v}"
         f"setpts=PTS-STARTPTS,"
-        f"{portrait_rot}"
+#        f"{portrait_rot}"
         f"scale={TARGET_W}:{TOP_H}:force_original_aspect_ratio=decrease,"
         f"pad={TARGET_W}:{TOP_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}[top];"
 
         f"{landscape_v}"
         f"setpts=PTS-STARTPTS,"
-        f"{landscape_rot}"
+#        f"{landscape_rot}"
         f"scale={TARGET_W}:{BOTTOM_H}:force_original_aspect_ratio=decrease,"
         f"pad={TARGET_W}:{BOTTOM_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}[bottom];"
 
@@ -88,7 +88,6 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
     cmd = [
         "ffmpeg",
         "-y",
-        "-noautorotate",
 
         "-ss", offset_str,
         "-i", str(clip1),
@@ -102,21 +101,16 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
         "-map", "[outv]",
 
         "-c:v", "hevc_nvenc",
-        "-preset", "p6",
-        "-rc", "vbr_hq",
-        "-b:v", "3.8M",
-        "-maxrate", "5M",
-        "-bufsize", "10M",
-        "-g", "240",
-        "-spatial_aq", "1",
-        "-temporal_aq", "1",
-        "-aq-strength", "8",
-        "-rc-lookahead", "32",
+        "-preset", "p5",
+        "-rc", "vbr",
+        "-b:v", "5M",
+        "-maxrate", "6M",
+        "-bufsize", "12M",
+        "-g", "60",
         "-profile:v", "main",
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",
         "-movflags", "+faststart",
-        "-r", "30",
 
         str(outVideo),
     ]
