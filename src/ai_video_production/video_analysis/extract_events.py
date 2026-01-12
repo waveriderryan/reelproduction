@@ -53,9 +53,10 @@ if __name__ == '__main__':
     video_bytes = open(video_file_name, 'rb').read()
     print(f"Video loaded: {len(video_bytes)} bytes, took {time.time() - start_time} seconds")
     api_key = input("Enter Google Genai API key: ")
+    activity_type = input("Enter activity type ('high five', 'tennis match'...): ")
 
     import asyncio
-    output = asyncio.run(extract_events(activity_type="high five", video_byte=video_bytes, api_key=api_key))
+    output = asyncio.run(extract_events(activity_type=activity_type, video_byte=video_bytes, api_key=api_key))
     print(f"Found events:\n{output}")
 
 

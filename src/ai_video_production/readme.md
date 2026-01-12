@@ -15,6 +15,16 @@
 - [ ] Tagging
 - [x] Events extraction
 
+### Usage ###
+Input:
+- video file name with path
+- Google GenAI API key
+- Activity type ('high five', 'tennis match'...)
+
+Entry point:
+```shell
+src\ai_video_production\video_analysis\extract_events.py
+```
 ---
 
 ## **3.Video Production**
