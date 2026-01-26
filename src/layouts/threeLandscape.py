@@ -1,17 +1,16 @@
 # layouts/threeLandscape.py
 from pathlib import Path
 
-def buildThreeLandscapeCmd(localPaths, offsets, outVideo: Path):
-    """
-    3 landscape cameras → stacked vertically on a portrait 1080x1920 canvas.
-    Uses offsets EXACTLY as provided, no sync logic.
-    """
-
+def buildThreeLandscapeCmd(
+    localPaths,
+    startTimes,
+    baseDuration,
+    outVideo: Path,
+):
     clip1, clip2, clip3 = localPaths
-    off1, off2, off3 = offsets
 
     LOGO = "/app/assets/reelchains_logo.png"
-    PAD = "0x5762FF"
+    PAD = "0x000000"
 
     CANVAS_W = 1080
     CANVAS_H = 1920
@@ -19,44 +18,52 @@ def buildThreeLandscapeCmd(localPaths, offsets, outVideo: Path):
     TILE_W = CANVAS_W
     TILE_H = CANVAS_H // 3   # 640 each
 
-    CROP = 0.80  # mild horizontal crop to remove side junk
+    CROP = 0.80  # mild horizontal crop (same as before)
+
+    t0, t1, t2 = map(float, startTimes)
 
     filtergraph = f"""
-        [0:v]setpts=PTS-STARTPTS,
-             crop=in_w*{CROP}:in_h:(in_w-in_w*{CROP})/2:0,
-             scale={TILE_W}:-2:force_original_aspect_ratio=decrease,
-             pad={TILE_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD}[v0];
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
 
-        [1:v]setpts=PTS-STARTPTS,
+        [0:v]setpts=PTS-STARTPTS+{t0}/TB,
              crop=in_w*{CROP}:in_h:(in_w-in_w*{CROP})/2:0,
-             scale={TILE_W}:-2:force_original_aspect_ratio=decrease,
-             pad={TILE_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD}[v1];
+             scale={TILE_W}:{TILE_H}:force_original_aspect_ratio=decrease,
+             pad={TILE_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD}
+             [v0];
 
-        [2:v]setpts=PTS-STARTPTS,
+        [1:v]setpts=PTS-STARTPTS+{t1}/TB,
              crop=in_w*{CROP}:in_h:(in_w-in_w*{CROP})/2:0,
-             scale={TILE_W}:-2:force_original_aspect_ratio=decrease,
-             pad={TILE_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD}[v2];
+             scale={TILE_W}:{TILE_H}:force_original_aspect_ratio=decrease,
+             pad={TILE_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD}
+             [v1];
 
-        [v0][v1][v2]vstack=inputs=3[stacked];
+        [2:v]setpts=PTS-STARTPTS+{t2}/TB,
+             crop=in_w*{CROP}:in_h:(in_w-in_w*{CROP})/2:0,
+             scale={TILE_W}:{TILE_H}:force_original_aspect_ratio=decrease,
+             pad={TILE_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD}
+             [v2];
+
+        [v0][v1][v2]vstack=inputs=3[layout];
+
+        [base][layout]overlay=0:0:eof_action=pass[bg];
 
         [3:v]scale=trunc({CANVAS_W}*0.20):-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.25'[logo_half];
 
-        [stacked][logo_half]overlay=(W-w)-48:(H-h)-48:format=auto[outv]
+        [bg][logo_half]overlay=(W-w)-48:(H-h)-48:format=auto[outv]
     """
 
     return [
         "ffmpeg", "-y",
 
-        "-ss", f"{off1}", "-i", str(clip1),
-        "-ss", f"{off2}", "-i", str(clip2),
-        "-ss", f"{off3}", "-i", str(clip3),
-
+        "-i", str(clip1),
+        "-i", str(clip2),
+        "-i", str(clip3),
         "-i", LOGO,
 
         "-filter_complex", filtergraph,
-
         "-map", "[outv]",
+
         "-c:v", "hevc_nvenc",
         "-preset", "p5",
         "-rc", "vbr",
@@ -68,5 +75,7 @@ def buildThreeLandscapeCmd(localPaths, offsets, outVideo: Path):
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",
         "-movflags", "+faststart",
+
         str(outVideo),
     ]
+

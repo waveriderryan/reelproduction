@@ -1,72 +1,99 @@
-# layouts/mixedThree.py
 from pathlib import Path
 
-def buildMixedThreeTwoLandscapeCmd(localPaths, orientations, offsets, outVideo: Path):
+
+def buildMixedThreeTwoLandscapeCmd(
+    localPaths,
+    orientations,
+    startTimes,
+    baseDuration,
+    outVideo: Path,
+):
     """
     1 portrait + 2 landscape → portrait canvas (1080x1920)
-    Portrait on top, two landscapes stacked below.
+    Timeline-based rendering.
+
+    Portrait (aggressively cropped vertically) on top,
+    two landscapes stacked below.
+
+    Key invariants:
+      - Every tile ends as exactly CANVAS_W x tile_h before stacking
+      - No fixed-size crop after a scale that might produce smaller frames
     """
+
+    LOGO = "/app/assets/reelchains_logo.png"
+    PAD = "0x000000"
+
+    # Canvas
+    CANVAS_W = 1080
+    CANVAS_H = 1920
+
+    # Layout geometry
+    TOP_H = 960
+    BOT_H = (CANVAS_H - TOP_H) // 2  # 480 each
+
+    # Cropping
+    PORTRAIT_CROP = 0.75   # keep middle 75% of height (aggressive); 0.70–0.85 reasonable
+    CROP_LAND = 0.80       # keep middle 80% of width
+
+    # Logo
+    LOGO_SCALE = 0.20
+    LOGO_ALPHA = 0.25
+    LOGO_PAD = 48
 
     # Identify indices
     portrait_idx = orientations.index("portrait")
     landscape_idxs = [i for i, o in enumerate(orientations) if o == "landscape"]
-
     if len(landscape_idxs) != 2:
-        raise ValueError("buildMixedThreeCmd requires exactly 1 portrait and 2 landscape inputs")
+        raise ValueError("mixedThreeTwoLandscape requires exactly 1 portrait and 2 landscape inputs")
+    l0, l1 = landscape_idxs
 
-    LOGO = "/app/assets/reelchains_logo.png"
-    PAD = "0x5762FF"
+    # Timeline start times (seconds)
+    t_p = float(startTimes[portrait_idx])
+    t_l0 = float(startTimes[l0])
+    t_l1 = float(startTimes[l1])
 
-    CANVAS_W = 1080
-    CANVAS_H = 1920
+    # Build filtergraph
+    filtergraph = f"""
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
 
-    TOP_H = 960
-    BOT_H = (CANVAS_H - TOP_H) // 2  # 480 each
+        [{portrait_idx}:v]setpts=PTS-STARTPTS+{t_p}/TB,
+            crop=iw:ih*{PORTRAIT_CROP}:0:(ih-ih*{PORTRAIT_CROP})/2,
+            scale={CANVAS_W}:{TOP_H}:force_original_aspect_ratio=increase,
+            crop={CANVAS_W}:{TOP_H}
+            [top];
 
-    CROP_LAND = 0.80  # same as threeLandscape
+        [{l0}:v]setpts=PTS-STARTPTS+{t_l0}/TB,
+            crop=iw*{CROP_LAND}:ih:(iw-iw*{CROP_LAND})/2:0,
+            scale={CANVAS_W}:{BOT_H}:force_original_aspect_ratio=increase,
+            crop={CANVAS_W}:{BOT_H}
+            [b0];
 
-    filtergraph = (
-        # --- Portrait hero ---
-        f"[{portrait_idx}:v]setpts=PTS-STARTPTS,"
-        f"scale={CANVAS_W}:{TOP_H}:force_original_aspect_ratio=decrease,"
-        f"pad={CANVAS_W}:{TOP_H}:(ow-iw)/2:(oh-ih)/2:{PAD}[top];"
+        [{l1}:v]setpts=PTS-STARTPTS+{t_l1}/TB,
+            crop=iw*{CROP_LAND}:ih:(iw-iw*{CROP_LAND})/2:0,
+            scale={CANVAS_W}:{BOT_H}:force_original_aspect_ratio=increase,
+            crop={CANVAS_W}:{BOT_H}
+            [b1];
 
-        # --- Landscape 1 ---
-        f"[{landscape_idxs[0]}:v]setpts=PTS-STARTPTS,"
-        f"crop=in_w*{CROP_LAND}:in_h:(in_w-in_w*{CROP_LAND})/2:0,"
-        f"scale={CANVAS_W}:-2:force_original_aspect_ratio=decrease,"
-        f"pad={CANVAS_W}:{BOT_H}:(ow-iw)/2:(oh-ih)/2:{PAD}[b0];"
+        [b0][b1]vstack=inputs=2[bottom];
+        [top][bottom]vstack=inputs=2[layout];
+        [base][layout]overlay=0:0:eof_action=pass[bg];
 
-        # --- Landscape 2 ---
-        f"[{landscape_idxs[1]}:v]setpts=PTS-STARTPTS,"
-        f"crop=in_w*{CROP_LAND}:in_h:(in_w-in_w*{CROP_LAND})/2:0,"
-        f"scale={CANVAS_W}:-2:force_original_aspect_ratio=decrease,"
-        f"pad={CANVAS_W}:{BOT_H}:(ow-iw)/2:(oh-ih)/2:{PAD}[b1];"
-
-        # --- Stack ---
-        "[b0][b1]vstack=inputs=2[bottom];"
-        "[top][bottom]vstack=inputs=2[stacked];"
-
-        # --- Logo ---
-        f"[3:v]scale=iw*0.20:-1:force_original_aspect_ratio=decrease,format=rgba[logo];"
-        "[logo]lut=a='val*0.25'[logo_half];"
-        "[stacked][logo_half]overlay=(W-w)-48:(H-h)-48[outv]"
-    )
+        [3:v]scale=iw*{LOGO_SCALE}:-1:force_original_aspect_ratio=decrease,format=rgba[logo];
+        [logo]lut=a='val*{LOGO_ALPHA}'[logo_half];
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto[outv]
+    """
 
     return [
         "ffmpeg", "-y",
 
-        # Inputs (offsets respected exactly)
-        "-ss", f"{offsets[0]}", "-i", str(localPaths[0]),
-        "-ss", f"{offsets[1]}", "-i", str(localPaths[1]),
-        "-ss", f"{offsets[2]}", "-i", str(localPaths[2]),
-
+        "-i", str(localPaths[0]),
+        "-i", str(localPaths[1]),
+        "-i", str(localPaths[2]),
         "-i", LOGO,
 
         "-filter_complex", filtergraph,
         "-map", "[outv]",
 
-        # Encoding — same family as your others
         "-c:v", "hevc_nvenc",
         "-preset", "p5",
         "-rc", "vbr",

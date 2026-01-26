@@ -37,41 +37,47 @@ def run(cmd: list):
     if r.returncode != 0:
         raise RuntimeError(f"Command failed: {cmd}")
 
+def count_orientations(orientations):
+        portraits = sum(1 for o in orientations if o == "portrait")
+        landscapes = sum(1 for o in orientations if o == "landscape")
+        return portraits, landscapes
 
-def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path):
+    
+def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path, startTimes, baseDuration):
     n = len(localPaths)
+
+    render_mode = "trim"
 
     if n == 2:
         mode1, mode2 = orientations
         if mode1 == "portrait" and mode2 == "portrait":
-            cmd = buildTwoPortraitCmd(localPaths, offsets, outVideo)
+            cmd = buildTwoPortraitCmd(localPaths, startTimes, outVideo, baseDuration)
+            render_mode = "timeline"
         elif mode1 == "landscape" and mode2 == "landscape":
-            cmd = buildTwoLandscapeCmd(localPaths, offsets, outVideo)
+            cmd = buildTwoLandscapeCmd(localPaths, startTimes, outVideo, baseDuration)
+            render_mode = "timeline"
         else:
-            cmd = buildMixedTwoCmd(localPaths, orientations, offsets, outVideo)
+            cmd = buildMixedTwoCmd(localPaths, orientations, startTimes, baseDuration, outVideo)
+            render_mode = "timeline"
 
     elif n == 3:
         p = orientations.count("portrait")
         l = orientations.count("landscape")
 
         if p == 3:
-            cmd = buildThreePortraitCmd(...)
+            cmd = buildThreePortraitCmd(localPaths, startTimes, baseDuration, outVideo)
+            render_mode = "timeline"
         elif l == 3:
-            cmd = buildThreeLandscapeCmd(...)
+            cmd = buildThreeLandscapeCmd(localPaths, startTimes, baseDuration, outVideo)
+            render_mode = "timeline"
         elif p == 1 and l == 2:
-            cmd = buildMixedThreeTwoLandscapeCmd(...)
+            cmd = buildMixedThreeTwoLandscapeCmd(localPaths, orientations, startTimes, baseDuration, outVideo)
+            render_mode = "timeline"
         elif p == 2 and l == 1:
-            cmd = buildMixedThreeTwoPortraitCmd(...)
+            cmd = buildMixedThreeTwoPortraitCmd(localPaths, orientations, startTimes, baseDuration, outVideo)
+            render_mode = "timeline"
         else:
             raise ValueError("Unsupported orientation mix")
-        
-        # 3 portrait or 3 landscape only (for now)
-        # if all(m == "portrait" for m in orientations):
-        #     cmd = buildThreePortraitCmd(localPaths, offsets, outVideo)
-        # elif all(m == "landscape" for m in orientations):
-        #     cmd = buildThreeLandscapeCmd(localPaths, offsets, outVideo)
-        # else:
-        #     raise NotImplementedError("Mixed 3-input layout not implemented.")
     elif n == 4:
             portraits, landscapes = count_orientations(orientations)
 
@@ -95,11 +101,10 @@ def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path):
 
     else:
         raise ValueError("Invalid number of inputs.")
-
-
-    def count_orientations(orientations):
-        portraits = sum(1 for o in orientations if o == "portrait")
-        landscapes = sum(1 for o in orientations if o == "landscape")
-        return portraits, landscapes
-
+    
     run(cmd)
+
+    return render_mode
+
+
+    

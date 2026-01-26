@@ -50,8 +50,13 @@ PROJECT_ID=$(curl -fs -H "Metadata-Flavor: Google" \
 SUBSCRIPTION_ID=$(curl -fs -H "Metadata-Flavor: Google" \
   "http://metadata.google.internal/computeMetadata/v1/instance/attributes/subscription_id")
 
+# [NEW] Fetch the Topic. Defaults to "production-results" if missing.
+RESULT_TOPIC=$(curl -fs -H "Metadata-Flavor: Google" \
+  "http://metadata.google.internal/computeMetadata/v1/instance/attributes/result_topic" || echo "production-results")
+
 echo "📡 Project:        ${PROJECT_ID}"
 echo "📡 Subscription:  ${SUBSCRIPTION_ID}"
+echo "📡 Result Topic:  ${RESULT_TOPIC}"
 
 # ---------------------------------------------------------
 # 3. DEBUG MODE (VM stays up, container does not auto-run)
@@ -104,6 +109,7 @@ docker run \
   --name production-worker \
   -e GCP_PROJECT="${PROJECT_ID}" \
   -e PUBSUB_SUBSCRIPTION="${SUBSCRIPTION_ID}" \
+  -e RESULT_TOPIC="${RESULT_TOPIC}" \
   -e WORKER_MODE="single_task" \
   -v /data:/data \
   "${IMAGE}"

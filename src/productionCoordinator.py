@@ -11,7 +11,10 @@ from google.cloud import pubsub_v1
 import productionJob
 
 # CONFIGURATION
-RESULT_TOPIC_ID = "production-results"
+# Read from Docker Env Var, default to 'production-results' for safety
+RESULT_TOPIC_ID = os.environ.get("RESULT_TOPIC", "production-results")
+
+print(f"⚙️ Configured to reply to topic: {RESULT_TOPIC_ID}")
 
 
 def get_gcp_instance_name():

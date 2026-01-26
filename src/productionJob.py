@@ -6,10 +6,42 @@ from google.cloud import storage
 
 # Helper imports
 from ffmpegVideoRender import renderFinalVideo
-from ffmpegAudioTools import extractAudioTrack, mixAudioTracks, muxVideoAudio
+from ffmpegAudioTools import extractAudioTrimmed, extractAudioUntrimmed, mixAudioTracksTrim, mixAudioTracksTimeline, muxVideoAudio, muxVideoWithTimelineAudio
 
 import subprocess
 import json
+
+def get_video_duration_seconds(video_path: str) -> float:
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "format=duration",
+        "-of", "default=nw=1:nk=1",
+        video_path,
+    ]
+    out = subprocess.check_output(cmd).decode().strip()
+    return float(out)
+
+def choose_thumbnail_time(duration: float) -> float:
+    # Avoid black frames at t=0 and EOF edge cases
+    if duration < 1.0:
+        return 0.0
+    return max(0.1, duration * 0.5)
+
+def extract_thumbnail(video_path: str, output_jpeg: str, timestamp: float):
+    cmd = [
+        "ffmpeg", "-y",
+        "-skip_frame", "nokey",     # 🔑 decode ONLY keyframes
+        "-ss", f"{timestamp:.3f}",  # seek to nearest keyframe at/after timestamp
+        "-i", video_path,
+        "-frames:v", "1",
+        "-q:v", "2",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        output_jpeg,
+    ]
+    subprocess.run(cmd, check=True)
+
 
 def get_video_metadata(file_path):
     print(f"🔍 Probing metadata for: {file_path}")
@@ -106,6 +138,8 @@ def run_job(bucket_name, input_specs, output_gcs_paths, workdir_str="/workspace"
     Returns: (final_output_path, metadata_dict)
     """
     workdir = Path(workdir_str).resolve()
+    thumbnail_path = workdir / "thumbnail.jpg"
+
     workdir.mkdir(parents=True, exist_ok=True)
     client = storage.Client()
 
@@ -139,8 +173,26 @@ def run_job(bucket_name, input_specs, output_gcs_paths, workdir_str="/workspace"
     metadata = {}
 
     try:
-        print("🎥 Rendering video track...")
-        renderFinalVideo(local_paths, orientations, offsets, final_video_track)
+        print(" Finding clip durations...")
+        clip_durations = [
+            get_video_duration_seconds(str(p))
+            for p in local_paths
+        ]
+
+        latest_start = max(offsets)
+
+        start_times = [
+            latest_start - off
+            for off in offsets
+        ]
+
+        base_duration = max(
+            start_times[i] + clip_durations[i]
+            for i in range(len(local_paths))
+        ) + 0.25   # small safety pad
+
+        print(f"🎥 !Rendering video track...base duration is {base_duration}")
+        render_mode = renderFinalVideo(local_paths, orientations, offsets, final_video_track, start_times, base_duration)
         
         # ✅ Extract Metadata HERE (while we have the clean video track)
         # This is safe because orientation/duration won't change after audio muxing
@@ -150,11 +202,15 @@ def run_job(bucket_name, input_specs, output_gcs_paths, workdir_str="/workspace"
     except Exception as e:
         raise RuntimeError(f"Video render failed: {e}")
 
+    assert final_video_track.exists(), f"Video missing: {final_video_track}"
+    assert final_video_track.stat().st_size > 0, "Video file is empty"
+
     # ---------------------------------------------------------
     # 3. Process Audio & Mux
     # ---------------------------------------------------------
     primary_output_path = None
-    
+    uploaded_outputs = []
+
     try:
         print("🔊 Processing audio...")
         audio_files = []
@@ -162,7 +218,11 @@ def run_job(bucket_name, input_specs, output_gcs_paths, workdir_str="/workspace"
         # Extract audio from source clips
         for i, video_path in enumerate(local_paths):
             audio_out = workdir / f"audio_track_{i}.aac"
-            extractAudioTrack(video_path, audio_out, offsets[i])
+            if render_mode == "trim":
+                extractAudioTrimmed(video_path, audio_out, offsets[i])
+            else:
+                extractAudioUntrimmed(video_path, audio_out)
+
             audio_files.append(audio_out)
 
         n_outputs = len(output_gcs_paths)
@@ -170,13 +230,16 @@ def run_job(bucket_name, input_specs, output_gcs_paths, workdir_str="/workspace"
         # Strategy A: Mixed Audio (1 Output)
         if n_outputs == 1:
             mixed_audio = workdir / "mixed_audio.aac"
-            mixAudioTracks(audio_files, mixed_audio)
-            
+            if (render_mode == "trim"):
+                mixAudioTracksTrim(audio_files, mixed_audio)
+            else:
+                mixAudioTracksTimeline(audio_files, mixed_audio, start_times)
             final_output = workdir / "final_output.mp4"
             muxVideoAudio(final_video_track, mixed_audio, final_output)
             
             print(f"⬆️ Uploading to {output_gcs_paths[0]}...")
             uploadToGCS(bucket_name, output_gcs_paths[0], final_output, client)
+            uploaded_outputs.append(output_gcs_paths[0])
             
             primary_output_path = final_output
 
@@ -186,18 +249,54 @@ def run_job(bucket_name, input_specs, output_gcs_paths, workdir_str="/workspace"
                 # Unique output for each audio track
                 final_output = workdir / f"final_output_{i}.mp4"
                 
-                # Mux the SAME video with DIFFERENT source audio
-                muxVideoAudio(final_video_track, audio_files[i], final_output)
+                if (render_mode == "trim"): 
+                    # Mux the SAME video with DIFFERENT source audio
+                    muxVideoAudio(final_video_track, audio_files[i], final_output)
+                else:
+                    muxVideoWithTimelineAudio(final_video_track, audio_files[i], start_times[i], final_output)
                 
+
                 print(f"⬆️ Uploading variation {i} to {out_gcs_path}...")
                 uploadToGCS(bucket_name, out_gcs_path, final_output, client)
-                
+                uploaded_outputs.append(out_gcs_path)
+
                 # We just return the first one as the "primary" for logging purposes
                 if i == 0:
                     primary_output_path = final_output
 
     except Exception as e:
         raise RuntimeError(f"Audio/Mux processing failed: {e}")
+    
+    # ---------------------------------------------------------
+    # 3.5 Generate Thumbnail(s)
+    # ---------------------------------------------------------
+    try:
+        print("🖼️ Generating thumbnail...")
+
+        duration = get_video_duration_seconds(str(final_video_track))
+        thumb_time = choose_thumbnail_time(duration)
+
+        extract_thumbnail(
+            video_path=str(final_video_track),
+            output_jpeg=str(thumbnail_path),
+            timestamp=thumb_time,
+        )
+
+        # Option A: upload a JPEG per output (same bytes, different name)
+        for out_gcs_path in uploaded_outputs:
+            base_name = Path(out_gcs_path).with_suffix("").name
+            thumb_gcs_path = f"productions/{base_name}.jpg"
+
+            uploadToGCS(
+                bucket_name,
+                thumb_gcs_path,
+                thumbnail_path,
+                client,
+            )
+
+    except Exception as e:
+        # Thumbnail failure must NEVER fail the job
+        print(f"⚠️ Thumbnail generation failed: {e}")
 
     print("✅ Job Complete.")
     

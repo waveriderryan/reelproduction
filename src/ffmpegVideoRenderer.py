@@ -31,13 +31,13 @@ def run(cmd: list):
         raise RuntimeError(f"Command failed: {cmd}")
 
 
-def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path):
+def renderFinalVideoOLD(localPaths, orientations, offsets, outVideo: Path, startTimes, baseDuration):
     n = len(localPaths)
 
     if n == 2:
         mode1, mode2 = orientations
         if mode1 == "portrait" and mode2 == "portrait":
-            cmd = buildTwoPortraitCmd(localPaths, offsets, outVideo)
+            cmd = buildTwoPortraitCmd(localPaths, startTimes, baseDuration, outVideo)
         elif mode1 == "landscape" and mode2 == "landscape":
             cmd = buildTwoLandscapeCmd(localPaths, offsets, outVideo)
         else:

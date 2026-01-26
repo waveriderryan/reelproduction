@@ -2,53 +2,23 @@ from pathlib import Path
 import subprocess
 
 
-def get_input_resolution(path: Path):
-    try:
-        cmd = [
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "default=nw=1:nk=1",
-            str(path),
-        ]
-        out = subprocess.check_output(cmd).decode().strip().split()
-        return tuple(map(int, out))
-    except Exception:
-        return (1920, 1080)
-
-
-def compute_rotation_filter(orientation: str, width: int, height: int):
-    is_portrait_sensor = (orientation == "portrait")
-    is_portrait_pixels = height > width
-    is_landscape_pixels = width >= height
-
-    if is_portrait_sensor and is_landscape_pixels:
-        return "transpose=clock,"
-    if is_portrait_sensor and is_portrait_pixels:
-        return ""
-    if (orientation == "landscape") and is_portrait_pixels:
-        return "transpose=cclock,"
-    return ""
-
-
-def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
-
+def buildMixedTwoCmd(
+    localPaths,
+    orientations,
+    startTimes,      # <-- NEW: timeline start times (seconds)
+    baseDuration,    # <-- NEW: total timeline duration (seconds)
+    outVideo: Path,
+):
     clip1, clip2 = localPaths
-    off1, _ = offsets
 
     LOGO = "/app/assets/reelchains_logo.png"
-    PAD_COLOR = "0x5762FF"
+    PAD_COLOR = "0x000000"
 
     TARGET_W = 1080
     TOP_H = 1280
     BOTTOM_H = 640
 
-    if isinstance(off1, (list, tuple)):
-        if not off1:
-            raise ValueError("Offset list for first clip is empty.")
-        off1 = off1[0]
-    offset_str = f"{float(off1):.6f}"
-
+    # Identify which clip is portrait vs landscape
     if orientations[0] == "portrait":
         portrait_idx = 0
         landscape_idx = 1
@@ -56,45 +26,42 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
         portrait_idx = 1
         landscape_idx = 0
 
-    pw, ph = get_input_resolution(localPaths[portrait_idx])
-    lw, lh = get_input_resolution(localPaths[landscape_idx])
-
-#    portrait_rot = compute_rotation_filter(orientations[portrait_idx], pw, ph)
-#    landscape_rot = compute_rotation_filter(orientations[landscape_idx], lw, lh)
+    portrait_start = float(startTimes[portrait_idx])
+    landscape_start = float(startTimes[landscape_idx])
 
     portrait_v = f"[{portrait_idx}:v]"
     landscape_v = f"[{landscape_idx}:v]"
 
-    filtergraph = (
-        f"{portrait_v}"
-        f"setpts=PTS-STARTPTS,"
-#        f"{portrait_rot}"
-        f"scale={TARGET_W}:{TOP_H}:force_original_aspect_ratio=decrease,"
-        f"pad={TARGET_W}:{TOP_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}[top];"
+    filtergraph = f"""
+        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:d={baseDuration}[base];
 
-        f"{landscape_v}"
-        f"setpts=PTS-STARTPTS,"
-#        f"{landscape_rot}"
-        f"scale={TARGET_W}:{BOTTOM_H}:force_original_aspect_ratio=decrease,"
-        f"pad={TARGET_W}:{BOTTOM_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}[bottom];"
+        {portrait_v}
+            setpts=PTS-STARTPTS+{portrait_start}/TB,
+            scale={TARGET_W}:{TOP_H}:force_original_aspect_ratio=decrease,
+            pad={TARGET_W}:{TOP_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}
+            [top];
 
-        f"[top][bottom]vstack=inputs=2[bg];"
+        {landscape_v}
+            setpts=PTS-STARTPTS+{landscape_start}/TB,
+            scale={TARGET_W}:{BOTTOM_H}:force_original_aspect_ratio=decrease,
+            pad={TARGET_W}:{BOTTOM_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}
+            [bottom];
 
-        f"[2:v]scale=iw*0.30:-1,format=rgba[logo];"
-        f"[logo]lut=a='val*0.50'[logo_half];"
-        f"[bg][logo_half]overlay=(W-w)-40:(H-h)-40[outv]"
-    )
+        [top][bottom]vstack=inputs=2[layout];
 
-    cmd = [
-        "ffmpeg",
-        "-y",
+        [base][layout]overlay=0:0:eof_action=pass[bg];
 
-        "-ss", offset_str,
+        [2:v]scale=iw*0.30:-1:force_original_aspect_ratio=decrease,format=rgba[logo];
+        [logo]lut=a='val*0.50'[logo_half];
+
+        [bg][logo_half]overlay=(W-w)-40:(H-h)-40[outv]
+    """
+
+    return [
+        "ffmpeg", "-y",
+
         "-i", str(clip1),
-
-        "-ss", "0",
         "-i", str(clip2),
-
         "-i", LOGO,
 
         "-filter_complex", filtergraph,
@@ -114,5 +81,3 @@ def buildMixedTwoCmd(localPaths, orientations, offsets, outVideo: Path):
 
         str(outVideo),
     ]
-
-    return cmd
