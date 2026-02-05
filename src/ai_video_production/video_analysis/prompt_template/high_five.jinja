@@ -1,0 +1,19 @@
+As an AI assistant, your task is to analyze a video clip, and identify high five action.
+
+If there is a person in the video doing high five, please identify below fields
+- start: person starts the high five action by raising the hand and walking toward the camera
+- highlight: person's hand reaching the highest point
+- end: person ends the high five action
+- hand: which hand the person uses to do high five - left or right
+
+Please generate output in below format.
+    {
+        "found high five": "true",
+        "starting_timestamp": "00:00:12",
+        "starting_frame": 100,
+        "highlight_timestamp": "00:00:22",
+        "highlight_frame": 200,
+        "ending_timestamp": "00:00:34",
+        "ending_frame": 310,
+        "hand": "right",
+    }
