@@ -15,7 +15,7 @@ This file delegates layout logic to:
 
 from pathlib import Path
 import subprocess
-import sys
+
 
 from layouts.twoPortrait import buildTwoPortraitCmd
 from layouts.twoLandscape import buildTwoLandscapeCmd
@@ -29,6 +29,7 @@ from layouts.fourPortrait import buildFourPortraitCmd
 from layouts.mixedFourOneLandscape import buildMixedFourOneLandscapeCmd
 from layouts.mixedFourOnePortrait import buildMixedFourOnePortraitCmd
 from layouts.mixedFourTwoLandscape import buildMixedFourTwoLandscapeCmd
+from layouts.hi5 import buildHi5TwoPortraitCmd
 
 
 def run(cmd: list):
@@ -43,7 +44,8 @@ def count_orientations(orientations):
         return portraits, landscapes
 
     
-def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path, startTimes, baseDuration):
+def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path, 
+                     startTimes, baseDuration, production_type, is_left_hand):
     n = len(localPaths)
 
     render_mode = "trim"
@@ -51,8 +53,12 @@ def renderFinalVideo(localPaths, orientations, offsets, outVideo: Path, startTim
     if n == 2:
         mode1, mode2 = orientations
         if mode1 == "portrait" and mode2 == "portrait":
-            cmd = buildTwoPortraitCmd(localPaths, startTimes, outVideo, baseDuration)
-            render_mode = "timeline"
+            if production_type == "hi_5":
+                cmd = buildHi5TwoPortraitCmd(localPaths, offsets, outVideo, baseDuration, is_left_hand=is_left_hand)
+                render_mode = "trim"            
+            else:
+                cmd = buildTwoPortraitCmd(localPaths, startTimes, outVideo, baseDuration)
+                render_mode = "timeline"
         elif mode1 == "landscape" and mode2 == "landscape":
             cmd = buildTwoLandscapeCmd(localPaths, startTimes, outVideo, baseDuration)
             render_mode = "timeline"

@@ -124,12 +124,12 @@ set -e
 
 if [[ ${EXIT_CODE} -eq 0 ]]; then
   echo "✅ Job finished cleanly"
-  echo "⏱ Shutting down VM in 60s"
-  sleep 60
+  echo "⏱ Shutting down VM in 15s"
+  sleep 15
   shutdown -h now
 else
   echo "🔥 CRITICAL FAILURE"
-  echo "🧪 VM will remain up for 30 minutes for debugging"
-  sleep 1800
+  echo "🧪 VM will remain up for 5 minutes for debugging"
+  sleep 300
   shutdown -h now
 fi

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Audio helpers: extract, mix, mux.
-Now offset-aware and timestamp-safe.
+Offset-aware and timeline-safe.
 """
 
 import subprocess
@@ -16,30 +16,30 @@ def run(cmd: list):
 
 
 # --------------------------------------------------------------
-#  FIXED: Offset-aware audio extraction + timestamp reset
+# TRIM MODE: Offset-aware audio extraction + timestamp reset
 # --------------------------------------------------------------
 def extractAudioTrimmed(inVideo: Path, outAudio: Path, offset: float):
     """
     Extracts the audio track, honoring clip offset.
-    Matches the sync behavior of your original bash script.
-
     offset == seconds to trim from this camera.
     """
     cmd = [
         "ffmpeg",
         "-y",
-        "-ss", f"{offset}",     # apply same trim as VIDEO
+        "-ss", f"{offset}",
         "-i", str(inVideo),
         "-vn",
-        "-af", "asetpts=PTS-STARTPTS",  # reset timestamps
-        "-acodec", "aac",
+        "-af", "asetpts=PTS-STARTPTS",
+        "-c:a", "aac",
         "-b:a", "192k",
         str(outAudio),
     ]
     run(cmd)
 
+
 # --------------------------------------------------------------
-# TIMELINE MODE: Raw audio extraction (no trim, no PTS reset)
+# TIMELINE MODE: Raw audio extraction (no trim). We reset PTS so
+# adelay/mix is deterministic even if the container has odd PTS.
 # --------------------------------------------------------------
 def extractAudioUntrimmed(inVideo: Path, outAudio: Path):
     """
@@ -51,24 +51,26 @@ def extractAudioUntrimmed(inVideo: Path, outAudio: Path):
         "-y",
         "-i", str(inVideo),
         "-vn",
-        "-acodec", "aac",
+        "-af", "asetpts=PTS-STARTPTS",
+        "-c:a", "aac",
         "-b:a", "192k",
         str(outAudio),
     ]
     run(cmd)
 
+
 # --------------------------------------------------------------
-# Mixing multiple audio streams (unchanged)
+# TRIM MODE: Mix multiple already-trimmed audio streams
 # --------------------------------------------------------------
 def mixAudioTracksTrim(audioList, outAudio: Path):
-    # Build amix command
     inputs = []
     maps = []
     for a in audioList:
         inputs += ["-i", str(a)]
         maps.append(f"[{len(maps)}:a]")
 
-    amix = f"{''.join(maps)}amix=inputs={len(audioList)}:duration=longest[aout]"
+    # Use longest so we don't accidentally truncate when one track is shorter
+    amix = f"{''.join(maps)}amix=inputs={len(audioList)}:duration=longest:normalize=0[aout]"
 
     cmd = [
         "ffmpeg",
@@ -82,6 +84,7 @@ def mixAudioTracksTrim(audioList, outAudio: Path):
     ]
     run(cmd)
 
+
 # --------------------------------------------------------------
 # TIMELINE MODE: Offset-based audio mixing using adelay
 # --------------------------------------------------------------
@@ -89,51 +92,60 @@ def mixAudioTracksTimeline(
     audio_files: list[Path],
     outAudio: Path,
     offsets: list[float],
+    target_duration: float | None = None,
 ):
     """
     Mixes audio tracks by placing them on a global timeline.
-    Offsets are in seconds.
-    """
+    Offsets are in seconds (>=0). Uses adelay + apad + amix=longest.
 
+    If target_duration is provided, trims mixed audio to exactly that duration.
+    """
     assert len(audio_files) == len(offsets)
 
-    inputs = []
-    filter_parts = []
+    inputs: list[str] = []
+    filter_parts: list[str] = []
 
     for i, audio_file in enumerate(audio_files):
         inputs += ["-i", str(audio_file)]
 
-        delay_ms = int(offsets[i] * 1000)
+        delay_ms = max(0, int(offsets[i] * 1000))
 
         # stereo-safe delay: left|right
+        # apad prevents amix from terminating early when streams start late
         filter_parts.append(
-            f"[{i}:a]adelay={delay_ms}|{delay_ms}[a{i}]"
+            f"[{i}:a]adelay={delay_ms}|{delay_ms},apad[a{i}]"
         )
 
     mix_inputs = "".join(f"[a{i}]" for i in range(len(audio_files)))
 
-    # filter_complex = (
-    #     "; ".join(filter_parts)
-    #     + f"; {mix_inputs}amix=inputs={len(audio_files)}:normalize=0"
-    filter_complex = (
-    "; ".join(filter_parts)
-    + f"; {mix_inputs}amix=inputs={len(audio_files)}:normalize=0:duration=shortest"
-)
+    # Mix to longest so late-starting streams don't get truncated
+    filter_parts.append(
+        f"{mix_inputs}amix=inputs={len(audio_files)}:normalize=0:duration=longest[aout]"
     )
+
+    out_label = "[aout]"
+    if target_duration is not None:
+        # Trim to exact timeline duration and reset timestamps
+        filter_parts.append(f"[aout]atrim=0:{target_duration},asetpts=PTS-STARTPTS[aout2]")
+        out_label = "[aout2]"
+
+    filter_complex = "; ".join(filter_parts)
 
     cmd = [
         "ffmpeg",
         "-y",
         *inputs,
         "-filter_complex", filter_complex,
-        "-acodec", "aac",
+        "-map", out_label,
+        "-c:a", "aac",
         "-b:a", "192k",
         str(outAudio),
     ]
     run(cmd)
 
+
 # --------------------------------------------------------------
-# Video + Audio mux (unchanged)
+# Video + Audio mux
 # --------------------------------------------------------------
 def muxVideoAudio(inVideo: Path, inAudio: Path, outFile: Path):
     cmd = [
@@ -141,14 +153,17 @@ def muxVideoAudio(inVideo: Path, inAudio: Path, outFile: Path):
         "-y",
         "-i", str(inVideo),
         "-i", str(inAudio),
-        "-map", "0:v",
-        "-map", "1:a",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
         "-c:v", "copy",
         "-c:a", "aac",
+        "-b:a", "192k",
         "-movflags", "+faststart",
+        "-shortest",
         str(outFile),
     ]
     run(cmd)
+
 
 def muxVideoWithTimelineAudio(
     video_path: Path,
@@ -168,11 +183,14 @@ def muxVideoWithTimelineAudio(
         "-i", str(video_path),
         "-i", str(audio_path),
         "-filter_complex",
-        f"[1:a]adelay={delay_ms}|{delay_ms}[a]",
-        "-map", "0:v",
+        f"[1:a]adelay={delay_ms}|{delay_ms},apad,asetpts=PTS-STARTPTS[a]",
+        "-map", "0:v:0",
         "-map", "[a]",
         "-c:v", "copy",
         "-c:a", "aac",
+        "-b:a", "192k",
+        "-movflags", "+faststart",
+        "-shortest",
         str(out_path),
     ]
     run(cmd)

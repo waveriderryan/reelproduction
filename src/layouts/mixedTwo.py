@@ -33,7 +33,7 @@ def buildMixedTwoCmd(
     landscape_v = f"[{landscape_idx}:v]"
 
     filtergraph = f"""
-        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:d={baseDuration}[base];
+        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:d={baseDuration}:rate=30000/1001[base];
 
         {portrait_v}
             setpts=PTS-STARTPTS+{portrait_start}/TB,
@@ -47,15 +47,16 @@ def buildMixedTwoCmd(
             pad={TARGET_W}:{BOTTOM_H}:(ow-iw)/2:(oh-ih)/2:{PAD_COLOR}
             [bottom];
 
-        [top][bottom]vstack=inputs=2[layout];
+        [top][bottom]vstack=inputs=2, setpts=PTS-STARTPTS[layout];
 
-        [base][layout]overlay=0:0:eof_action=pass[bg];
+        [base][layout]overlay=0:0:eof_action=pass:shortest=1[bg];
 
         [2:v]scale=iw*0.30:-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.50'[logo_half];
 
         [bg][logo_half]overlay=(W-w)-40:(H-h)-40[outv]
     """
+
 
     return [
         "ffmpeg", "-y",
