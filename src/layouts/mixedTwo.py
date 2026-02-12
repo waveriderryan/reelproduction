@@ -1,12 +1,10 @@
 from pathlib import Path
-import subprocess
-
 
 def buildMixedTwoCmd(
     localPaths,
     orientations,
-    startTimes,      # <-- NEW: timeline start times (seconds)
-    baseDuration,    # <-- NEW: total timeline duration (seconds)
+    startTimes,      # timeline start times (seconds)
+    baseDuration,    # total timeline duration (seconds)
     outVideo: Path,
 ):
     clip1, clip2 = localPaths
@@ -33,7 +31,7 @@ def buildMixedTwoCmd(
     landscape_v = f"[{landscape_idx}:v]"
 
     filtergraph = f"""
-        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:d={baseDuration}:rate=30000/1001[base];
+        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:d={baseDuration}[base];
 
         {portrait_v}
             setpts=PTS-STARTPTS+{portrait_start}/TB,
@@ -49,14 +47,13 @@ def buildMixedTwoCmd(
 
         [top][bottom]vstack=inputs=2, setpts=PTS-STARTPTS[layout];
 
-        [base][layout]overlay=0:0:eof_action=pass:shortest=1[bg];
+        [base][layout]overlay=0:0:eof_action=pass[bg];
 
         [2:v]scale=iw*0.30:-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.50'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-40:(H-h)-40[outv]
+        [bg][logo_half]overlay=(W-w)-40:(H-h)-40:format=auto[outv]
     """
-
 
     return [
         "ffmpeg", "-y",
@@ -68,6 +65,9 @@ def buildMixedTwoCmd(
         "-filter_complex", filtergraph,
         "-map", "[outv]",
 
+        # Match twoPortrait timing model
+        "-video_track_timescale", "90000",
+
         "-c:v", "hevc_nvenc",
         "-preset", "p5",
         "-rc", "vbr",
@@ -75,6 +75,8 @@ def buildMixedTwoCmd(
         "-maxrate", "6M",
         "-bufsize", "12M",
         "-g", "60",
+        "-bf", "0",        # ✅ NO B-FRAMES → no decode delay
+        "-refs", "1",     # ✅ single reference frame (optional but helps latency)
         "-profile:v", "main",
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",

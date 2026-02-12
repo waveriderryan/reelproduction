@@ -17,6 +17,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
         color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
 
         [0:v]
+            trim=start=0,
             setpts=PTS-STARTPTS+{startTimes[0]}/TB,
             scale={TILE_W}:{CANVAS_H}:force_original_aspect_ratio=increase,
             crop={TILE_W}:{CANVAS_H},
@@ -24,6 +25,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
             [v0];
 
         [1:v]
+            trim=start=0,
             setpts=PTS-STARTPTS+{startTimes[1]}/TB,
             scale={TILE_W}:{CANVAS_H}:force_original_aspect_ratio=increase,
             crop={TILE_W}:{CANVAS_H},
@@ -31,10 +33,14 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
             [v1];
 
         [v0][v1]hstack=inputs=2[stacked];
-        
+
         [base][stacked]overlay=0:0:eof_action=pass[bg];
 
-        [2:v]scale=trunc({CANVAS_W}*{LOGO_SCALE}):-1:force_original_aspect_ratio=decrease,format=rgba[logo];
+        [2:v]
+            scale=trunc({CANVAS_W}*{LOGO_SCALE}):-1:force_original_aspect_ratio=decrease,
+            format=rgba
+            [logo];
+
         [logo]lut=a='val*{LOGO_ALPHA}'[logo_half];
 
         [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto[outv]
@@ -50,6 +56,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
         "-filter_complex", filtergraph,
         "-map", "[outv]",
 
+        # Stable timescale for iOS/QuickTime
         "-video_track_timescale", "90000",
 
         "-c:v", "hevc_nvenc",
@@ -59,6 +66,8 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
         "-maxrate", "6M",
         "-bufsize", "12M",
         "-g", "60",
+        "-bf", "0",        # ✅ NO B-FRAMES → no decode delay
+        "-refs", "1",     # ✅ single reference frame (optional but helps latency)
         "-profile:v", "main",
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",

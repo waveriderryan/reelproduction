@@ -329,12 +329,26 @@ def get_video_metadata(file_path: Path):
 # NEW: Clip finalization via manifest
 # -----------------------------
 def parse_iso_utc(ts: str) -> float:
-    # expects "2026-02-09T15:31:12.206Z"
-    return (
-        datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ")
-        .replace(tzinfo=timezone.utc)
-        .timestamp()
-    )
+    """
+    Parses ISO-8601 UTC timestamps with or without milliseconds.
+    Accepts:
+      - 2026-02-12T04:48:54Z
+      - 2026-02-12T04:48:54.178Z
+    Returns: POSIX timestamp (float seconds)
+    """
+    ts = ts.strip()
+
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            return (
+                datetime.strptime(ts, fmt)
+                .replace(tzinfo=timezone.utc)
+                .timestamp()
+            )
+        except ValueError:
+            continue
+
+    raise ValueError(f"Unrecognized timestamp format: {ts}")
 
 
 def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path) -> str:
@@ -381,32 +395,29 @@ def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path)
 
     subprocess.check_call([
         "ffmpeg", "-y",
-
-        # Concat stitched segments
         "-f", "concat", "-safe", "0",
         "-i", str(concat_list),
 
-        # Map streams explicitly
-        "-map", "0:v:0",
-        "-map", "0:a:0?",
+        # Video: normalize CFR
+        "-vsync", "cfr",
+        "-r", "30000/1001",
 
-        # 🔧 Encode once → canonical master (NO TIMELINE MODIFICATION)
+        # ❌ DO NOT TOUCH AUDIO CLOCK
         "-c:v", "hevc_nvenc",
         "-preset", "p5",
         "-pix_fmt", "yuv420p",
         "-profile:v", "main",
-        "-tag:v", "hvc1",          # QuickTime requires this for HEVC
-        "-g", "60",
+        "-tag:v", "hvc1",
 
-        # 🔧 Audio encode (no resampling / no timeline forcing)
-        "-c:a", "aac",
-        "-b:a", "192k",
+        # 🔒 Audio passthrough (preserve original timing)
+        "-c:a", "copy",
 
-        # 🔧 Container flags for Apple
         "-movflags", "+faststart",
-
         str(stitched_video),
     ])
+
+
+
 
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 def buildTwoLandscapeCmd(localPaths, startTimes, outVideo: Path, baseDuration):
     """
     2-landscape TIMELINE layout:
-      - Portrait canvas (1080x1920)
+      - Portrait canvas (1080x1400)
       - Landscape clips stacked vertically
       - Clips appear at their startTimes
       - No input trimming (-ss)
@@ -19,32 +19,39 @@ def buildTwoLandscapeCmd(localPaths, startTimes, outVideo: Path, baseDuration):
 
     CANVAS_W = 1080
     CANVAS_H = 1400
-    TILE_H = CANVAS_H // 2  # 960 each
+    TILE_H = CANVAS_H // 2
 
     CROP_FACTOR = 0.80
 
     filtergraph = f"""
         color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
 
-        [0:v]setpts=PTS-STARTPTS+{t0}/TB,
-             crop=in_w*{CROP_FACTOR}:in_h:(in_w-in_w*{CROP_FACTOR})/2:0,
-             scale={CANVAS_W}:{TILE_H}:force_original_aspect_ratio=increase,
-             crop={CANVAS_W}:{TILE_H},
-             format=rgba[v0];
+        [0:v]
+            setpts=PTS-STARTPTS+{t0}/TB,
+            crop=in_w*{CROP_FACTOR}:in_h:(in_w-in_w*{CROP_FACTOR})/2:0,
+            scale={CANVAS_W}:{TILE_H}:force_original_aspect_ratio=increase,
+            crop={CANVAS_W}:{TILE_H},
+            pad={CANVAS_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD},
+            format=rgba
+            [v0];
 
-        [1:v]setpts=PTS-STARTPTS+{t1}/TB,
-             crop=in_w*{CROP_FACTOR}:in_h:(in_w-in_w*{CROP_FACTOR})/2:0,
-             scale={CANVAS_W}:{TILE_H}:force_original_aspect_ratio=increase,
-             crop={CANVAS_W}:{TILE_H},
-             format=rgba[v1];
+        [1:v]
+            setpts=PTS-STARTPTS+{t1}/TB,
+            crop=in_w*{CROP_FACTOR}:in_h:(in_w-in_w*{CROP_FACTOR})/2:0,
+            scale={CANVAS_W}:{TILE_H}:force_original_aspect_ratio=increase,
+            crop={CANVAS_W}:{TILE_H},
+            pad={CANVAS_W}:{TILE_H}:(ow-iw)/2:(oh-ih)/2:{PAD},
+            format=rgba
+            [v1];
 
-        [base][v0]overlay=0:0:eof_action=pass[tmp];
-        [tmp][v1]overlay=0:{TILE_H}:eof_action=pass[stacked];
+        [v0][v1]vstack=inputs=2[layout];
 
-        [2:v]scale=403.5:60:force_original_aspect_ratio=decrease,format=rgba[logo];
+        [base][layout]overlay=0:0:eof_action=pass[bg];
+
+        [2:v]scale=trunc({CANVAS_W}*0.30):-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.25'[logo_half];
 
-        [stacked][logo_half]overlay=(W-w)-10:(H-h)-10[outv]
+        [bg][logo_half]overlay=(W-w)-10:(H-h)-10:format=auto[outv]
     """
 
     return [
@@ -56,7 +63,9 @@ def buildTwoLandscapeCmd(localPaths, startTimes, outVideo: Path, baseDuration):
 
         "-filter_complex", filtergraph,
         "-map", "[outv]",
-        "-shortest",
+
+        # 🔒 Container timing stability
+        "-video_track_timescale", "90000",
 
         "-c:v", "hevc_nvenc",
         "-preset", "p5",
