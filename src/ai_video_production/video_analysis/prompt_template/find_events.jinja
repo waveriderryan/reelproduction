@@ -1,0 +1,21 @@
+{% import 'activities.jinja' as activities %}
+
+As an AI assistant, your task is to analyze a video clip. The video is taken from a {{activity_type}}
+
+Please find out events in the video, identify the approximate starting timestamp/frame and ending timestamp/frame of each rally.
+Also generate description of the event. Please include camera angle, people, and summary in the description of the event. Please focus on the primary content, and ignore what happened in the background in the video.
+
+Example of events of a {{activity_type}}
+{{ activities.EXAMPLE_EVENTS[activity_type] }}
+
+Please generate output in below format.
+[
+    {
+        "event_id": "tennis_rally_1",
+        "starting_timestamp": "00:00:12",
+        "starting_frame": 100,
+        "ending_timestamp": "00:00:34",
+        "ending_frame": 310,
+        "description": "",
+    },
+]
