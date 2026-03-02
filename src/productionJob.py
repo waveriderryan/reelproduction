@@ -353,11 +353,11 @@ def parse_iso_utc(ts: str) -> float:
 
 def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path) -> str:
     master_gcs = f"clips/{clip_id}_master.mp4"
-    if gcs_exists(bucket_name, master_gcs, client):
-        print(f"✅ Canonical clip exists: gs://{bucket_name}/{master_gcs}")
-        return master_gcs
+    # if gcs_exists(bucket_name, master_gcs, client):
+    #     print(f"✅ Canonical clip exists: gs://{bucket_name}/{master_gcs}")
+    #     return master_gcs
 
-    print(f"🧵 Canonical clip missing. Finalizing clip {clip_id}...")
+    print(f"🧵 always stitch in current mode... Finalizing clip {clip_id}...")
 
     artifact_root = f"artifacts/{clip_id}"
     manifest_gcs = f"{artifact_root}/manifest.json"
@@ -393,32 +393,66 @@ def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path)
 
     print("🎞️ Canonicalizing master clip (CFR + unified timebase)")
 
+
+    # subprocess.check_call([
+    #     "ffmpeg", "-y",
+    #     "-f", "concat", "-safe", "0",
+    #     "-i", str(concat_list),
+
+    #     # 🔒 Normalize video clock ONCE (this is correct to keep)
+    #     "-vsync", "cfr",
+    #     "-r", "30000/1001",
+
+    #     # 🔒 Re-encode audio to remove chunk boundary artifacts
+    #     "-c:a", "aac",
+    #     "-b:a", "192k",
+
+    #     # 🔒 Re-encode video ONCE into canonical timeline (H.264)
+    #     "-c:v", "h264_nvenc",
+    #     "-preset", "p5",
+    #     "-pix_fmt", "yuv420p",
+    #     "-profile:v", "high",
+    #     "-bf", "0",            # 👈 important: no B-frames = no decode reordering
+    #     "-g", "60",
+
+    #     "-movflags", "+faststart",
+    #     str(stitched_video),
+    # ])
+
+    # subprocess.check_call([
+    #     "ffmpeg", "-y",
+    #     "-f", "concat", "-safe", "0",
+    #     "-i", str(concat_list),
+
+    #     # ✅ DO NOT TOUCH VIDEO TIMING
+    #     "-c:v", "copy",
+
+    #     # ✅ Heal audio boundaries
+    #     "-c:a", "aac",
+    #     "-b:a", "192k",
+    #     "-ar", "48000",
+
+    #     # Optional: small audio fade at joins (usually unnecessary once timebase is fixed)
+    #     # "-af", "aresample=async=1:min_hard_comp=0.100:first_pts=0",
+
+    #     "-movflags", "+faststart",
+    #     str(stitched_video),
+    # ])
+
     subprocess.check_call([
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(concat_list),
 
-        # Video: normalize CFR
-        "-vsync", "cfr",
-        "-r", "30000/1001",
+        # 🚫 DO NOT touch video timing
+        "-c:v", "copy",
 
-        # ❌ DO NOT TOUCH AUDIO CLOCK
-        "-c:v", "hevc_nvenc",
-        "-preset", "p5",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "main",
-        "-tag:v", "hvc1",
-
-        # 🔒 Audio passthrough (preserve original timing)
+        # 🚫 DO NOT resample audio clock
         "-c:a", "copy",
 
         "-movflags", "+faststart",
         str(stitched_video),
     ])
-
-
-
-
 
 
     # Final container normalization (safe but optional now)
@@ -475,7 +509,11 @@ def run_job(
 
             master_gcs_path = f"clips/{clip_id}_master.mp4"
             local_video = workdir / f"clip{idx}_{clip_id}_master.mp4"
-            downloadFromGCS(bucket_name, master_gcs_path, local_video, client)
+
+            if local_video.exists() and local_video.stat().st_size > 0:
+                print(f"🧪 Reusing local master clip: {local_video}")
+            else:
+                downloadFromGCS(bucket_name, master_gcs_path, local_video, client)
 
             local_paths.append(local_video)
             orientations.append(orient)

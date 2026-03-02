@@ -94,54 +94,50 @@ def mixAudioTracksTimeline(
     offsets: list[float],
     target_duration: float | None = None,
 ):
-    """
-    Mixes audio tracks by placing them on a global timeline.
-    Offsets are in seconds (>=0). Uses adelay + apad + amix=longest.
-
-    If target_duration is provided, trims mixed audio to exactly that duration.
-    """
-    assert len(audio_files) == len(offsets)
-
-    inputs: list[str] = []
-    filter_parts: list[str] = []
+    inputs = []
+    filter_parts = []
 
     for i, audio_file in enumerate(audio_files):
         inputs += ["-i", str(audio_file)]
 
         delay_ms = max(0, int(offsets[i] * 1000))
 
-        # stereo-safe delay: left|right
-        # apad prevents amix from terminating early when streams start late
+        # 👇 THIS IS THE CRITICAL PART
         filter_parts.append(
-            f"[{i}:a]adelay={delay_ms}|{delay_ms},apad[a{i}]"
+            f"[{i}:a]"
+            f"adelay={delay_ms}|{delay_ms},"
+            f"aresample=async=1:min_hard_comp=0.100:first_pts=0,"
+            f"apad[a{i}]"
         )
 
     mix_inputs = "".join(f"[a{i}]" for i in range(len(audio_files)))
 
-    # Mix to longest so late-starting streams don't get truncated
     filter_parts.append(
         f"{mix_inputs}amix=inputs={len(audio_files)}:normalize=0:duration=longest[aout]"
     )
 
-    out_label = "[aout]"
     if target_duration is not None:
-        # Trim to exact timeline duration and reset timestamps
-        filter_parts.append(f"[aout]atrim=0:{target_duration},asetpts=PTS-STARTPTS[aout2]")
+        filter_parts.append(
+            f"[aout]atrim=0:{target_duration},asetpts=PTS-STARTPTS[aout2]"
+        )
         out_label = "[aout2]"
+    else:
+        out_label = "[aout]"
 
     filter_complex = "; ".join(filter_parts)
 
     cmd = [
-        "ffmpeg",
-        "-y",
-        *inputs,
+        "ffmpeg", "-y",
+        *sum([["-i", str(p)] for p in audio_files], []),
         "-filter_complex", filter_complex,
         "-map", out_label,
         "-c:a", "aac",
         "-b:a", "192k",
         str(outAudio),
     ]
-    run(cmd)
+
+    subprocess.check_call(cmd)
+
 
 
 # --------------------------------------------------------------
