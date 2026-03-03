@@ -80,7 +80,8 @@ def buildMixedThreeTwoLandscapeCmd(
 
         [3:v]scale=iw*{LOGO_SCALE}:-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*{LOGO_ALPHA}'[logo_half];
-        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
+
     """
 
     return [

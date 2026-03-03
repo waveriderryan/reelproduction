@@ -17,6 +17,10 @@ def buildThreePortraitCmd(
 
     TILE_W = CANVAS_W // 3   # 640
     TILE_H = CANVAS_H
+    LOGO_SCALE = 0.18
+    LOGO_ALPHA = 0.70
+    LOGO_PAD = 48
+
 
     CROP = 0.90  # mild vertical crop (same as before)
 
@@ -50,7 +54,8 @@ def buildThreePortraitCmd(
         [3:v]scale=trunc({CANVAS_W}*0.20):-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.25'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-48:(H-h)-48:format=auto[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
+        
     """
 
     return [

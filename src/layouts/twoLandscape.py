@@ -20,6 +20,10 @@ def buildTwoLandscapeCmd(localPaths, startTimes, outVideo: Path, baseDuration):
     CANVAS_W = 1080
     CANVAS_H = 1400
     TILE_H = CANVAS_H // 2
+    LOGO_SCALE = 0.18
+    LOGO_ALPHA = 0.70
+    LOGO_PAD = 48
+
 
     CROP_FACTOR = 0.80
 
@@ -51,7 +55,7 @@ def buildTwoLandscapeCmd(localPaths, startTimes, outVideo: Path, baseDuration):
         [2:v]scale=trunc({CANVAS_W}*0.30):-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.25'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-10:(H-h)-10:format=auto[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
     """
 
     return [

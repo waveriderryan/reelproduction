@@ -15,6 +15,9 @@ def buildMixedTwoCmd(
     TARGET_W = 1080
     TOP_H = 1280
     BOTTOM_H = 640
+    LOGO_SCALE = 0.18
+    LOGO_ALPHA = 0.70
+    LOGO_PAD = 48
 
     # Identify which clip is portrait vs landscape
     if orientations[0] == "portrait":
@@ -52,7 +55,8 @@ def buildMixedTwoCmd(
         [2:v]scale=iw*0.30:-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.50'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-40:(H-h)-40:format=auto[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
+
     """
 
     return [
