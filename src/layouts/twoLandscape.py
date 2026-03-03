@@ -24,7 +24,7 @@ def buildTwoLandscapeCmd(localPaths, startTimes, outVideo: Path, baseDuration):
     CROP_FACTOR = 0.80
 
     filtergraph = f"""
-        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30000/1001:d={baseDuration}[base];
 
         [0:v]
             setpts=PTS-STARTPTS+{t0}/TB,

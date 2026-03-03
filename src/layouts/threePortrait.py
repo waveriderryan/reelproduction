@@ -23,7 +23,7 @@ def buildThreePortraitCmd(
     t0, t1, t2 = map(float, startTimes)
 
     filtergraph = f"""
-        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30000/1001:d={baseDuration}[base];
 
         [0:v]setpts=PTS-STARTPTS+{t0}/TB,
              crop=in_w:in_h*{CROP}:0:(in_h-in_h*{CROP})/2,

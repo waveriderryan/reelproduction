@@ -23,7 +23,7 @@ def buildThreeLandscapeCmd(
     t0, t1, t2 = map(float, startTimes)
 
     filtergraph = f"""
-        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30000/1001:d={baseDuration}[base];
 
         [0:v]setpts=PTS-STARTPTS+{t0}/TB,
              crop=in_w*{CROP}:in_h:(in_w-in_w*{CROP})/2:0,

@@ -62,6 +62,7 @@ def buildMixedFourTwoLandscapeCmd(localPaths, offsets, outVideo: Path):
 
         "-filter_complex", filtergraph,
         "-map", "[outv]",
+        "-r", "30000/1001",
 
         "-c:v", "hevc_nvenc",
         "-preset", "p5",

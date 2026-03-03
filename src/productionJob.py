@@ -391,74 +391,115 @@ def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path)
 
     stitched_video = workdir / f"{clip_id}_stitched.mp4"
 
-    print("🎞️ Canonicalizing master clip (CFR + unified timebase)")
+    print("🎞️ Stitching video-only master...")
 
-
-    # subprocess.check_call([
-    #     "ffmpeg", "-y",
-    #     "-f", "concat", "-safe", "0",
-    #     "-i", str(concat_list),
-
-    #     # 🔒 Normalize video clock ONCE (this is correct to keep)
-    #     "-vsync", "cfr",
-    #     "-r", "30000/1001",
-
-    #     # 🔒 Re-encode audio to remove chunk boundary artifacts
-    #     "-c:a", "aac",
-    #     "-b:a", "192k",
-
-    #     # 🔒 Re-encode video ONCE into canonical timeline (H.264)
-    #     "-c:v", "h264_nvenc",
-    #     "-preset", "p5",
-    #     "-pix_fmt", "yuv420p",
-    #     "-profile:v", "high",
-    #     "-bf", "0",            # 👈 important: no B-frames = no decode reordering
-    #     "-g", "60",
-
-    #     "-movflags", "+faststart",
-    #     str(stitched_video),
-    # ])
-
-    # subprocess.check_call([
-    #     "ffmpeg", "-y",
-    #     "-f", "concat", "-safe", "0",
-    #     "-i", str(concat_list),
-
-    #     # ✅ DO NOT TOUCH VIDEO TIMING
-    #     "-c:v", "copy",
-
-    #     # ✅ Heal audio boundaries
-    #     "-c:a", "aac",
-    #     "-b:a", "192k",
-    #     "-ar", "48000",
-
-    #     # Optional: small audio fade at joins (usually unnecessary once timebase is fixed)
-    #     # "-af", "aresample=async=1:min_hard_comp=0.100:first_pts=0",
-
-    #     "-movflags", "+faststart",
-    #     str(stitched_video),
-    # ])
-
+    # -------------------------------------------------------
+    # 1️⃣ Concat VIDEO ONLY (no audio, no timestamp tricks)
+    # -------------------------------------------------------
     subprocess.check_call([
         "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
+        "-f", "concat",
+        "-safe", "0",
         "-i", str(concat_list),
 
-        # 🚫 DO NOT touch video timing
-        "-c:v", "copy",
+        "-vf", "fps=30000/1001,setpts=PTS-STARTPTS",
 
-        # 🚫 DO NOT resample audio clock
-        "-c:a", "copy",
+        "-c:v", "h264_nvenc",
+        "-preset", "p5",
+        "-rc", "vbr",
+        "-b:v", "12M",
+        "-maxrate", "14M",
+        "-bufsize", "28M",
 
+        "-g", "60",
+        "-bf", "0",
+        "-refs", "1",
+        "-profile:v", "high",
+        "-pix_fmt", "yuv420p",
+
+        "-video_track_timescale", "90000",
         "-movflags", "+faststart",
         str(stitched_video),
     ])
 
+    # -------------------------------------------------------
+    # 2️⃣ Attach external continuous audio artifact (if present)
+    # -------------------------------------------------------
+    audio_info = manifest.get("audio")
 
-    # Final container normalization (safe but optional now)
+    audio_artifact_path = None
+    audio_start_time_str = None
+
+    if audio_info:
+        audio_artifact_path = audio_info.get("path")
+        audio_start_time_str = audio_info.get("startTime")
+
     final_local = workdir / f"{clip_id}_master.mp4"
-    normalize_container_timestamps(stitched_video, final_local)
 
+    if audio_artifact_path and audio_start_time_str:
+        print("🔊 Using external audio artifact...")
+
+        local_audio = workdir / f"{clip_id}_audio_artifact.m4a"
+        downloadFromGCS(bucket_name, audio_artifact_path, local_audio, client)
+
+        video_start_time = parse_iso_utc(manifest["recordingStartTime"])
+        audio_start_time = parse_iso_utc(audio_start_time_str)
+
+        offset = video_start_time - audio_start_time
+        print(f"🎚️ Audio offset relative to video: {offset:.6f}s")
+
+        aligned_audio = workdir / f"{clip_id}_aligned_audio.m4a"
+
+        if offset > 0:
+            # Trim audio (audio started earlier)
+            subprocess.check_call([
+                "ffmpeg", "-y",
+                "-ss", f"{offset:.6f}",
+                "-i", str(local_audio),
+                "-c:a", "copy",
+                str(aligned_audio),
+            ])
+        elif offset < 0:
+            # Pad silence (audio started later)
+            pad = abs(offset)
+            subprocess.check_call([
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-i", str(local_audio),
+                "-filter_complex",
+                f"[0:a]atrim=0:{pad}[silence];[silence][1:a]concat=n=2:v=0:a=1[out]",
+                "-map", "[out]",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                str(aligned_audio),
+            ])
+        else:
+            aligned_audio = local_audio
+
+        # -------------------------------------------------------
+        # 3️⃣ Mux aligned audio with stitched video
+        # -------------------------------------------------------
+        subprocess.check_call([
+            "ffmpeg", "-y",
+            "-i", str(stitched_video),
+            "-i", str(aligned_audio),
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            "-shortest",
+            str(final_local),
+        ])
+
+    else:
+        # No audio artifact → master is video only
+        final_local = stitched_video
+
+    # -------------------------------------------------------
+    # 4️⃣ Upload final master
+    # -------------------------------------------------------
     uploadToGCS(bucket_name, master_gcs, final_local, client)
     print(f"⬆️ Wrote canonical clip: gs://{bucket_name}/{master_gcs}")
 

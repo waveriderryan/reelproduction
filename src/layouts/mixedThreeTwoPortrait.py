@@ -42,7 +42,7 @@ def buildMixedThreeTwoPortraitCmd(
     t_l0 = float(startTimes[l0])
     
     filtergraph = f"""
-        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30000/1001:d={baseDuration}[base];
 
         [{p0}:v]setpts=PTS-STARTPTS+{t_p0}/TB,
             scale={TOP_W_EACH}:{TOP_H}:force_original_aspect_ratio=decrease,

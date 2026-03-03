@@ -54,7 +54,7 @@ def buildMixedThreeTwoLandscapeCmd(
 
     # Build filtergraph
     filtergraph = f"""
-        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30000/1001:d={baseDuration}[base];
 
         [{portrait_idx}:v]setpts=PTS-STARTPTS+{t_p}/TB,
             crop=iw:ih*{PORTRAIT_CROP}:0:(ih-ih*{PORTRAIT_CROP})/2,

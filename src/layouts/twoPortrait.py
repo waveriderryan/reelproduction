@@ -14,8 +14,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
     TILE_W = CANVAS_W // 2
 
     filtergraph = f"""
-        color=c=black:s={CANVAS_W}x{CANVAS_H}:d={baseDuration}[base];
-
+        color=c=black:s={CANVAS_W}x{CANVAS_H}:r=30000/1001:d={baseDuration}[base];
         [0:v]
             trim=start=0,
             setpts=PTS-STARTPTS+{startTimes[0]}/TB,
@@ -43,7 +42,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
 
         [logo]lut=a='val*{LOGO_ALPHA}'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
     """
 
     return [

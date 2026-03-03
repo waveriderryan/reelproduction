@@ -31,7 +31,7 @@ def buildMixedTwoCmd(
     landscape_v = f"[{landscape_idx}:v]"
 
     filtergraph = f"""
-        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:d={baseDuration}[base];
+        color=c=black:s={TARGET_W}x{TOP_H + BOTTOM_H}:r=30000/1001:d={baseDuration}[base];
 
         {portrait_v}
             setpts=PTS-STARTPTS+{portrait_start}/TB,
