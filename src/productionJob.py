@@ -351,13 +351,17 @@ def parse_iso_utc(ts: str) -> float:
     raise ValueError(f"Unrecognized timestamp format: {ts}")
 
 
-def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path) -> str:
-    master_gcs = f"clips/{clip_id}_master.mp4"
-    # if gcs_exists(bucket_name, master_gcs, client):
-    #     print(f"✅ Canonical clip exists: gs://{bucket_name}/{master_gcs}")
-    #     return master_gcs
+def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path):
+    """
+    Builds:
+      - local video-only clip (for production timing)
+      - local master clip (video + audio, for upload)
 
-    print(f"🧵 always stitch in current mode... Finalizing clip {clip_id}...")
+    Uploads only the master.
+    Returns (local_video_only_path, local_master_path)
+    """
+
+    print(f"🧵 Finalizing clip {clip_id}...")
 
     artifact_root = f"artifacts/{clip_id}"
     manifest_gcs = f"{artifact_root}/manifest.json"
@@ -373,7 +377,12 @@ def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path)
     if not segments:
         raise RuntimeError(f"Clip {clip_id} manifest has no segments")
 
+    # --------------------------------------------------
+    # 1️⃣ Build VIDEO-ONLY locally
+    # --------------------------------------------------
+
     concat_list = workdir / f"{clip_id}_concat.txt"
+    kept = 0
 
     with concat_list.open("w") as f:
         for i, seg in enumerate(segments):
@@ -384,105 +393,79 @@ def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path)
             print(f"🔍 Segment {local_seg.name} duration = {dur:.3f}s")
 
             if dur < 0.5:
-                print(f"⚠️ Skipping tiny segment {local_seg.name}")
                 continue
 
             f.write(f"file '{local_seg.as_posix()}'\n")
+            kept += 1
 
-    stitched_video = workdir / f"{clip_id}_stitched.mp4"
+    if kept == 0:
+        raise RuntimeError(f"Clip {clip_id}: all segments invalid")
 
-    print("🎞️ Stitching video-only master...")
+    local_video_only = workdir / f"{clip_id}_video.mp4"
 
-    # -------------------------------------------------------
-    # 1️⃣ Concat VIDEO ONLY (no audio, no timestamp tricks)
-    # -------------------------------------------------------
     subprocess.check_call([
         "ffmpeg", "-y",
         "-f", "concat",
         "-safe", "0",
+        "-fflags", "+genpts",
         "-i", str(concat_list),
 
-        "-vf", "fps=30000/1001,setpts=PTS-STARTPTS",
+        "-map", "0:v:0",
+        "-an",
 
-        "-c:v", "h264_nvenc",
-        "-preset", "p5",
-        "-rc", "vbr",
-        "-b:v", "12M",
-        "-maxrate", "14M",
-        "-bufsize", "28M",
-
-        "-g", "60",
-        "-bf", "0",
-        "-refs", "1",
-        "-profile:v", "high",
-        "-pix_fmt", "yuv420p",
+        "-c", "copy",
 
         "-video_track_timescale", "90000",
         "-movflags", "+faststart",
-        str(stitched_video),
+
+        str(local_video_only),
     ])
 
-    # -------------------------------------------------------
-    # 2️⃣ Attach external continuous audio artifact (if present)
-    # -------------------------------------------------------
-    audio_info = manifest.get("audio")
+    # --------------------------------------------------
+    # 2️⃣ Build MASTER (video + audio)
+    # --------------------------------------------------
 
-    audio_artifact_path = None
-    audio_start_time_str = None
+    local_master = workdir / f"{clip_id}_master.mp4"
 
-    if audio_info:
-        audio_artifact_path = audio_info.get("path")
-        audio_start_time_str = audio_info.get("startTime")
+    audio_info = manifest.get("audio") or {}
+    audio_path = audio_info.get("path")
+    audio_start_time_str = audio_info.get("startTime")
 
-    final_local = workdir / f"{clip_id}_master.mp4"
+    if audio_path and audio_start_time_str:
 
-    if audio_artifact_path and audio_start_time_str:
-        print("🔊 Using external audio artifact...")
-
-        local_audio = workdir / f"{clip_id}_audio_artifact.m4a"
-        downloadFromGCS(bucket_name, audio_artifact_path, local_audio, client)
+        local_audio_src = workdir / f"{clip_id}_audio_src.mp4"
+        downloadFromGCS(bucket_name, audio_path, local_audio_src, client)
 
         video_start_time = parse_iso_utc(manifest["recordingStartTime"])
         audio_start_time = parse_iso_utc(audio_start_time_str)
-
         offset = video_start_time - audio_start_time
-        print(f"🎚️ Audio offset relative to video: {offset:.6f}s")
+
+        if offset > 0:
+            af = f"atrim=start={offset:.6f},asetpts=PTS-STARTPTS"
+        elif offset < 0:
+            delay_ms = int(round(abs(offset) * 1000))
+            af = f"adelay={delay_ms}|{delay_ms},asetpts=PTS-STARTPTS"
+        else:
+            af = "asetpts=PTS-STARTPTS"
 
         aligned_audio = workdir / f"{clip_id}_aligned_audio.m4a"
 
-        if offset > 0:
-            # Trim audio (audio started earlier)
-            subprocess.check_call([
-                "ffmpeg", "-y",
-                "-ss", f"{offset:.6f}",
-                "-i", str(local_audio),
-                "-c:a", "copy",
-                str(aligned_audio),
-            ])
-        elif offset < 0:
-            # Pad silence (audio started later)
-            pad = abs(offset)
-            subprocess.check_call([
-                "ffmpeg", "-y",
-                "-f", "lavfi",
-                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                "-i", str(local_audio),
-                "-filter_complex",
-                f"[0:a]atrim=0:{pad}[silence];[silence][1:a]concat=n=2:v=0:a=1[out]",
-                "-map", "[out]",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                str(aligned_audio),
-            ])
-        else:
-            aligned_audio = local_audio
-
-        # -------------------------------------------------------
-        # 3️⃣ Mux aligned audio with stitched video
-        # -------------------------------------------------------
         subprocess.check_call([
             "ffmpeg", "-y",
-            "-i", str(stitched_video),
+            "-i", str(local_audio_src),
+            "-vn",
+            "-af", af,
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ar", "48000",
+            "-ac", "2",
+            "-movflags", "+faststart",
+            str(aligned_audio),
+        ])
+
+        subprocess.check_call([
+            "ffmpeg", "-y",
+            "-i", str(local_video_only),
             "-i", str(aligned_audio),
             "-map", "0:v:0",
             "-map", "1:a:0",
@@ -490,22 +473,18 @@ def ensure_clip_finalized(bucket_name: str, clip_id: str, client, workdir: Path)
             "-c:a", "copy",
             "-movflags", "+faststart",
             "-shortest",
-            str(final_local),
+            str(local_master),
         ])
 
     else:
-        # No audio artifact → master is video only
-        final_local = stitched_video
+        local_master = local_video_only
 
-    # -------------------------------------------------------
-    # 4️⃣ Upload final master
-    # -------------------------------------------------------
-    uploadToGCS(bucket_name, master_gcs, final_local, client)
-    print(f"⬆️ Wrote canonical clip: gs://{bucket_name}/{master_gcs}")
+    # Upload only MASTER
+    master_gcs = f"clips/{clip_id}_master.mp4"
+    uploadToGCS(bucket_name, master_gcs, local_master, client)
+    print(f"⬆️ MASTER written: gs://{bucket_name}/{master_gcs}")
 
-    return master_gcs
-
-
+    return local_video_only, local_master
 
 # -----------------------------
 # Main job
@@ -534,7 +513,8 @@ def run_job(
     # ---------------------------------------------------------
     # 1. Ensure canonical clips exist + download inputs
     # ---------------------------------------------------------
-    local_paths: list[Path] = []
+    local_video_paths: list[Path] = []
+    local_master_paths: list[Path] = []
     orientations: list[str] = []
     start_times_abs: list[float] = []
     clip_ids: list[str] = []
@@ -545,22 +525,15 @@ def run_job(
             orient = inp["orientation"].lower().strip()
             start_time_str = inp["startTime"]
 
-            # Ensure canonical clip exists (stitch + audio mux if needed)
-            ensure_clip_finalized(bucket_name, clip_id, client, workdir)
+            local_video_only, local_master = ensure_clip_finalized(
+            bucket_name, clip_id, client, workdir)
 
-            master_gcs_path = f"clips/{clip_id}_master.mp4"
-            local_video = workdir / f"clip{idx}_{clip_id}_master.mp4"
+            local_video_paths.append(local_video_only)
+            local_master_paths.append(local_master)
 
-            if local_video.exists() and local_video.stat().st_size > 0:
-                print(f"🧪 Reusing local master clip: {local_video}")
-            else:
-                downloadFromGCS(bucket_name, master_gcs_path, local_video, client)
-
-            local_paths.append(local_video)
             orientations.append(orient)
             start_times_abs.append(parse_iso_utc(start_time_str))
             clip_ids.append(clip_id)
-
     except Exception as e:
         raise RuntimeError(f"Failed during input preparation/download: {e}")
 
@@ -581,16 +554,16 @@ def run_job(
 
     try:
         print("⏱️ Finding clip durations...")
-        clip_durations = [get_video_duration_seconds(str(p)) for p in local_paths]
+        clip_durations = [get_video_duration_seconds(str(p)) for p in local_video_paths]
 
-        base_duration = max(clip_durations) + 0.25
+        base_duration = max(clip_durations) + (1 / 29.97)
 
         print(f"🧮 clip_durations={clip_durations}")
 
         print(f"🎥 Rendering video track... base_duration={base_duration:.3f}s")
 
         render_mode = renderFinalVideo(
-            local_paths,
+            local_video_paths,
             orientations,
             trim_offsets,          # offsets (trim)
             final_video_track,
@@ -627,12 +600,12 @@ def run_job(
 
         # Extract audio from source clips into .m4a (NOT .aac)
         audio_files: list[Path] = []
-        for i, video_path in enumerate(local_paths):
+        for i, master_path in enumerate(local_master_paths):
             audio_out = workdir / f"audio_track_{i}.m4a"
             if render_mode == "trim":
-                extractAudioTrimmed(video_path, audio_out, offsets[i])
+                extractAudioTrimmed(master_path, audio_out, offsets[i])
             else:
-                extractAudioUntrimmed(video_path, audio_out)
+                extractAudioUntrimmed(master_path, audio_out)
             audio_files.append(audio_out)
 
         n_outputs = len(output_gcs_paths)

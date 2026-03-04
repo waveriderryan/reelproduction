@@ -53,7 +53,7 @@ def buildThreeLandscapeCmd(
         [3:v]scale=trunc({CANVAS_W}*0.20):-1:force_original_aspect_ratio=decrease,format=rgba[logo];
         [logo]lut=a='val*0.25'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto[outv]
 
     """
 

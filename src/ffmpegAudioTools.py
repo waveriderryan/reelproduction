@@ -106,7 +106,7 @@ def mixAudioTracksTimeline(
         filter_parts.append(
             f"[{i}:a]"
             f"adelay={delay_ms}|{delay_ms},"
-            f"aresample=async=1:min_hard_comp=0.100:first_pts=0,"
+            f"aresample=48000:first_pts=0,"
             f"apad[a{i}]"
         )
 

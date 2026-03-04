@@ -42,7 +42,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
 
         [logo]lut=a='val*{LOGO_ALPHA}'[logo_half];
 
-        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto,fps=30000/1001[outv]
+        [bg][logo_half]overlay=(W-w)-{LOGO_PAD}:(H-h)-{LOGO_PAD}:format=auto[outv]
     """
 
     return [
@@ -55,6 +55,7 @@ def buildTwoPortraitCmd(localPaths, startTimes, outVideo: Path, baseDuration):
         "-filter_complex", filtergraph,
         "-map", "[outv]",
 
+        
         # Stable timescale for iOS/QuickTime
         "-video_track_timescale", "90000",
 
